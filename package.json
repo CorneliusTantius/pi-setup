@@ -15,8 +15,7 @@
       "./extensions/pi-swarm.ts",
       "./extensions/pi-sys-prompt.ts",
       "./extensions/pi-theme.ts"
-    ],
-    "prompts": ["./prompts/*.md"]
+    ]
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",
