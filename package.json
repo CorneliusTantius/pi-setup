@@ -13,7 +13,6 @@
     "extensions": [
       "./extensions/pi-retry.ts",
       "./extensions/pi-swarm.ts",
-      "./extensions/pi-ext-mgr.ts",
       "./extensions/pi-sys-prompt.ts",
       "./extensions/pi-theme.ts"
     ],
