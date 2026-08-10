@@ -14,7 +14,9 @@
       "./extensions/pi-retry.ts",
       "./extensions/pi-swarm.ts",
       "./extensions/pi-sys-prompt.ts",
-      "./extensions/pi-theme.ts"
+      "./extensions/pi-theme.ts",
+      "./extensions/pi-deepseek-enhancement.ts",
+      "./extensions/pi-general-enhancement.ts"
     ]
   },
   "peerDependencies": {
