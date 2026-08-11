@@ -16,7 +16,8 @@
       "./extensions/pi-sys-prompt.ts",
       "./extensions/pi-theme.ts",
       "./extensions/pi-deepseek-enhancement.ts",
-      "./extensions/pi-general-enhancement.ts"
+      "./extensions/pi-general-enhancement.ts",
+      "./extensions/pi-rtk-rewrite.ts"
     ]
   },
   "peerDependencies": {
