@@ -1,19 +1,13 @@
-import { execSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
+
 // ── config ──────────────────────────────────────────────────────────
-const RTK_BIN = process.env.PI_RTK_BIN ?? "rtk";
-const RTK_REWRITE = process.env.PI_RTK_REWRITE !== "0";
-const RTK_COMPACT = process.env.PI_RTK_COMPACT !== "0";
-const SHOW_NOTICES = process.env.PI_RTK_NOTIFY !== "0";
-const RTK_JSON_COMPACT = process.env.PI_RTK_JSON !== "0";
-const BASH_TIMEOUT_MS = Number(process.env.PI_RTK_BASH_TIMEOUT ?? 120_000);
+const RTK_BIN = "rtk";
 const OUTPUT_LIMIT_BYTES = 45_000;
 
-// ── helpers ─────────────────────────────────────────────────────────
 
 function trimMsg(raw: string, max = 180): string {
 	const clean = raw.replace(/\s+/g, " ").trim();
@@ -318,18 +312,16 @@ interface CompactState { text: string; techniques: string[] }
 
 function compactBash(text: string, command: string | null): CompactState {
 	const st: CompactState = { text, techniques: [] };
-	if (RTK_COMPACT) {
-		st.text = stripAnsi(st.text);
-		if (st.text !== text) st.techniques.push("ansi");
-		const apply = (fn: (t: string, c: string | null) => string | null, tech: string) => {
-			const r = fn(st.text, command);
-			if (r !== null && r !== st.text) { st.text = r; st.techniques.push(tech); }
-		};
-		apply(filterBuildOutput, "build");
-		apply(aggregateTestOutput, "test");
-		apply(compactGitOutput, "git");
-		apply(aggregateLinterOutput, "linter");
-	}
+	st.text = stripAnsi(st.text);
+	if (st.text !== text) st.techniques.push("ansi");
+	const apply = (fn: (t: string, c: string | null) => string | null, tech: string) => {
+		const r = fn(st.text, command);
+		if (r !== null && r !== st.text) { st.text = r; st.techniques.push(tech); }
+	};
+	apply(filterBuildOutput, "build");
+	apply(aggregateTestOutput, "test");
+	apply(compactGitOutput, "git");
+	apply(aggregateLinterOutput, "linter");
 	return st;
 }
 
@@ -342,12 +334,10 @@ function compactJson(text: string): string | null {
 		const boringKeys = new Set([
 			"devDependencies", "peerDependencies", "optionalDependencies", "bundleDependencies",
 			"scripts", "engines", "publishConfig", "overrides", "pnpm", "lint-staged",
-			"commitlint", "release", "husky", "jest", "vitest", "babel", "prettier",
+			"commitlint", "release", "husky", "jest", "vitest",
 			"eslintConfig", "eslintIgnore", "stylelint", "volta", "packageManager",
-			"funding", "keywords", "categories", "contributes", "activationEvents",
-			"icon", "badges", "screenshots", "galleryBanner", "markdown",
 		]);
-		const listThreshold = 6;
+		const listThreshold = 12;
 
 		const strip = (val: unknown, depth: number): unknown => {
 			if (depth > 2) return val;
@@ -384,7 +374,7 @@ function readFile(path: string, offset?: number, limit?: number): string {
 	let content = readFileSync(path, "utf8");
 
 	// JSON compaction: strip boring fields, compact large lists
-	if (RTK_JSON_COMPACT && path.endsWith(".json") && offset === undefined && limit === undefined) {
+	if (path.endsWith(".json") && offset === undefined && limit === undefined) {
 		const compacted = compactJson(content);
 		if (compacted !== null) content = compacted;
 	}
@@ -420,7 +410,7 @@ let rtkStatus: { available: boolean; checkedAt: number; error?: string } = { ava
 
 async function checkRtk(pi: ExtensionAPI): Promise<boolean> {
 	const now = Date.now();
-	if (now - rtkStatus.checkedAt < 30_000) return rtkStatus.available;
+	if (now - rtkStatus.checkedAt < 300_000) return rtkStatus.available;
 	try {
 		const r = await pi.exec(RTK_BIN, ["--version"], { timeout: 5000 });
 		rtkStatus = { available: r.code === 0, checkedAt: now, error: r.code !== 0 ? `exit ${r.code}` : undefined };
@@ -485,13 +475,13 @@ export default function rtkRewriteExtension(pi: ExtensionAPI) {
 		parameters: BashParams,
 		async execute(_id, params, signal, onUpdate, ctx) {
 			let command = params.command;
-			const timeoutMs = (params.timeout ?? BASH_TIMEOUT_MS / 1000) * 1000;
+			const timeoutMs = (params.timeout ?? 90) * 1000;
 
 			// RTK rewrite
-			if (RTK_REWRITE && (await checkRtk(pi))) {
+			if (await checkRtk(pi)) {
 				const decision = await rewriteCommand(pi, command);
 				if (decision.changed) {
-					if (SHOW_NOTICES && ctx.hasUI) ctx.ui.notify(`RTK rewrite: ${trimMsg(command, 60)} → ${trimMsg(decision.rewritten, 60)}`, "info");
+					if (ctx.hasUI) ctx.ui.notify(`rtk: ${trimMsg(command, 60)} → ${trimMsg(decision.rewritten, 60)}`, "info");
 					command = decision.rewritten;
 				}
 			}
