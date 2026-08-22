@@ -1,11 +1,8 @@
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync } from "node:fs";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
-const CONFIG_PATH = join(getAgentDir(), "swarm.json");
 const MAX_PARALLEL = 6;
 const OUTPUT_LIMIT = 30_000;
 const DEFAULT_TIMEOUT_MS = 120_000;
@@ -18,7 +15,6 @@ type SwarmConfig = {
   defaultThinking?: ThinkingLevel;
   timeoutMs?: number;
   agents: Array<{
-    name: string;
     description: string;
     model?: string | null;
     thinking?: ThinkingLevel;
@@ -39,7 +35,7 @@ type RunResult = {
 };
 
 function defaultConfig(): SwarmConfig {
-  const defaultModel = "azure_ai/gpt-5.4-mini";
+  const defaultModel = "deepseek/deepseek-v4-flash";
 
   const base = [
     "You are a small focused swarm agent.",
@@ -50,14 +46,14 @@ function defaultConfig(): SwarmConfig {
 
   return {
     defaultModel,
-    defaultThinking: "low",
+    defaultThinking: "minimal",
     timeoutMs: DEFAULT_TIMEOUT_MS,
     agents: [
       {
         name: "scout",
         description: "Read-only code scout for locating files, APIs, and likely change points.",
         model: defaultModel,
-        thinking: "off",
+        thinking: "minimal",
         tools: ["read", "grep", "find", "ls"],
         systemPrompt: `${base}\nYou scout the repo and report exact files, symbols, and next steps. Do not edit files.`,
       },
@@ -65,7 +61,7 @@ function defaultConfig(): SwarmConfig {
         name: "worker",
         description: "Small implementation worker for boring localized changes.",
         model: defaultModel,
-        thinking: "off",
+        thinking: "minimal",
         tools: ["read", "edit", "write", "bash", "grep", "find", "ls"],
         systemPrompt: `${base}\nYou implement small localized code changes. Keep edits minimal and obvious.`,
       },
@@ -73,7 +69,7 @@ function defaultConfig(): SwarmConfig {
         name: "tester",
         description: "Test runner/debugger for failures, logs, and small fixes.",
         model: defaultModel,
-        thinking: "off",
+        thinking: "minimal",
         tools: ["read", "bash", "grep", "find", "ls", "edit"],
         systemPrompt: `${base}\nYou run targeted tests, diagnose failures, and suggest or apply small fixes only when asked.`,
       },
@@ -81,52 +77,12 @@ function defaultConfig(): SwarmConfig {
         name: "reviewer",
         description: "Read-only reviewer for diffs, risks, and missed edge cases.",
         model: defaultModel,
-        thinking: "off",
+        thinking: "minimal",
         tools: ["read", "bash", "grep", "find", "ls"],
         systemPrompt: `${base}\nYou review work. Prioritize bugs, regressions, missing tests, and simple fixes. Do not edit files.`,
       },
     ],
   };
-}
-
-function ensureConfig(): SwarmConfig {
-  if (!existsSync(CONFIG_PATH)) {
-    writeConfig(defaultConfig());
-  }
-  return readConfig();
-}
-
-function readConfig(): SwarmConfig {
-  const raw = readFileSync(CONFIG_PATH, "utf8");
-  const config = JSON.parse(raw) as SwarmConfig;
-  validateConfig(config);
-  return config;
-}
-
-function writeConfig(config: SwarmConfig) {
-  mkdirSync(join(CONFIG_PATH, ".."), { recursive: true });
-  writeFileSync(CONFIG_PATH, `${JSON.stringify(config, null, 2)}\n`, "utf8");
-}
-
-function validateConfig(config: SwarmConfig) {
-  if (!config || !Array.isArray(config.agents)) throw new Error("swarm.json must contain an agents array");
-  const names = new Set<string>();
-  for (const agent of config.agents) {
-    if (!agent.name || !agent.description || !agent.systemPrompt) {
-      throw new Error("Each agent needs name, description, and systemPrompt");
-    }
-    if (names.has(agent.name)) throw new Error(`Duplicate agent name: ${agent.name}`);
-    names.add(agent.name);
-    if (agent.thinking && !THINKING_LEVELS.includes(agent.thinking)) {
-      throw new Error(`Invalid thinking level for ${agent.name}: ${agent.thinking}`);
-    }
-  }
-  if (config.defaultThinking && !THINKING_LEVELS.includes(config.defaultThinking)) {
-    throw new Error(`Invalid defaultThinking: ${config.defaultThinking}`);
-  }
-  if (config.timeoutMs !== undefined && (typeof config.timeoutMs !== "number" || config.timeoutMs < 5000)) {
-    throw new Error("timeoutMs must be a number >= 5000 (5 seconds)");
-  }
 }
 
 function truncate(text: string) {
@@ -304,12 +260,12 @@ const TaskSchema = Type.Object({
 });
 
 export default function swarmExtension(pi: ExtensionAPI) {
-  ensureConfig();
+  const config = defaultConfig();
 
   pi.registerTool({
     name: "spawn_swarm",
     label: "Spawn Swarm",
-    description: `Spawn configured low/medium-thinking swarm agents from ${CONFIG_PATH}. Use one agent+task or parallel tasks.`,
+    description: "Spawn configured low/medium-thinking swarm agents. Use one agent+task or parallel tasks.",
     promptSnippet: "Spawn configured swarm agents for isolated grunt work, scouting, testing, or review.",
     promptGuidelines: [
       "Use spawn_swarm to delegate independent grunt-work tasks to small configured agents.",
@@ -321,7 +277,6 @@ export default function swarmExtension(pi: ExtensionAPI) {
       tasks: Type.Optional(Type.Array(TaskSchema, { description: "Parallel tasks. Max 6." })),
     }),
     async execute(_id, params, signal, onUpdate, ctx) {
-      const config = readConfig();
       const single = params.agent && params.task;
       const batch = params.tasks?.length ? params.tasks : undefined;
       if (Number(Boolean(single)) + Number(Boolean(batch)) !== 1) {
