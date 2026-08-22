@@ -15,6 +15,7 @@ type SwarmConfig = {
   defaultThinking?: ThinkingLevel;
   timeoutMs?: number;
   agents: Array<{
+    name: string;
     description: string;
     model?: string | null;
     thinking?: ThinkingLevel;
@@ -35,7 +36,7 @@ type RunResult = {
 };
 
 function defaultConfig(): SwarmConfig {
-  const defaultModel = "deepseek/deepseek-v4-flash";
+  const defaultModel = "azure_ai/deepseek-v4-flash";
 
   const base = [
     "You are a small focused swarm agent.",
