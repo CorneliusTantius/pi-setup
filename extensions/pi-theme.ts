@@ -46,7 +46,7 @@ const clip = (value: unknown): string => {
 const lastName = (name: string): string => String(name || "").split(".").pop()!;
 const stripAnsi = (line: string): string => String(line).replace(ANSI_RE, "").replace(OSC_RE, "");
 const trimLeft = (line: string): string => line.replace(/^((?:\x1b\[[0-9;]*m)*)\s+/, "$1");
-const rail = (): string => fg(getTheme(), "dim", "┆"););
+const rail = (): string => fg(getTheme(), "dim", "┆");
 function fg(theme: PiTheme | undefined | null, key: string, text: string): string {
   try {
     return theme?.fg?.(key, text) ?? text;
