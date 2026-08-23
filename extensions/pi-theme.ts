@@ -1,6 +1,7 @@
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
-import { AssistantMessageComponent, CustomEditor, FooterComponent, InteractiveMode, ToolExecutionComponent, UserMessageComponent } from "@earendil-works/pi-coding-agent";
-import { Text, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
+import { AssistantMessageComponent, CustomEditor, FooterComponent, InteractiveMode, ToolExecutionComponent, UserMessageComponent, VERSION } from "@earendil-works/pi-coding-agent";
+import { Component, CURSOR_MARKER, Text, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
+import { execSync } from "node:child_process";
 
 const TOOL_PATCHED = Symbol.for("pi-theme:patched-tool-renderers");
 const ASSISTANT_PATCHED = Symbol.for("pi-theme:patched-assistant-bubble");
@@ -362,6 +363,270 @@ function registerChatToggle(pi: ExtensionAPI): void {
   });
 }
 
+// ── Header ──────────────────────────────────────────────────────────────
+
+const HEADER_LOGO = [
+  " ██████╗██╗",
+  "██╔═══╝╚██╗",
+  "██║      ██║",
+  "██║      ██║",
+  "╚██████╗██╔╝",
+  " ╚═════╝╚═╝",
+];
+
+function headerModelLabel(model: any, thinking: string): string {
+  const id = model?.id || "no-model";
+  return model?.reasoning && thinking !== "off" ? `${id} · ${thinking}` : id;
+}
+
+function headerCwd(cwd: string): string {
+  const home = process.env.HOME;
+  if (!home) return cwd;
+  const rel = relative(home, cwd);
+  return rel === "" || rel.startsWith("..") ? cwd : `~/${rel}`;
+}
+
+function headerPickTips(commands: readonly { name: string }[]): string[] {
+  const tips = ["grinding", "implement-it", "plan-n-breakdown", "open-pr", "rewind", "model", "compact"]
+    .filter((n) => commands.some((c) => c.name === n));
+  return tips.slice(0, 4).map((n) => `/${n}`);
+}
+
+function renderHeader(width: number, theme: any, model: any, thinking: string, cwd: string, commands: readonly { name: string }[]): string[] {
+  if (width < 30) return [theme.fg("dim", `Pi v${VERSION}`)];
+  const paint = (s: string) => theme.fg("accent", s);
+  const muted = (s: string) => theme.fg("muted", s);
+  const dim = (s: string) => theme.fg("dim", s);
+  const bold = (s: string) => theme.bold(s);
+
+  const logo = HEADER_LOGO;
+  const logoW = Math.max(...logo.map((l) => visibleWidth(l)));
+  const tips = headerPickTips(commands);
+  const modelLine = `${bold("model")} ${headerModelLabel(model, thinking)}`;
+  const dirLine = `${muted("cwd")} ${dim(headerCwd(cwd))}`;
+
+  const leftLines = [...logo, "", bold("Build great code"), modelLine, dirLine];
+  const rightLines = tips.length ? ["", paint(bold("Commands")), ...tips.map((t) => muted(t)), ""] : [];
+
+  const leftW = logoW + 1;
+  const rightW = rightLines.length ? Math.max(...rightLines.map((l: string) => visibleWidth(l))) + 1 : 0;
+  const totalW = leftW + (rightW > 0 ? 3 + rightW : 0);
+  const useTips = width >= totalW + 6;
+
+  const out: string[] = [paint("╭─") + dim(` Pi v${VERSION} `) + paint("─".repeat(Math.max(0, width - visibleWidth(` Pi v${VERSION} `) - 4))) + paint("╮")];
+  const rows = Math.max(leftLines.length, useTips ? rightLines.length : 0);
+  for (let i = 0; i < rows; i++) {
+    const left = (leftLines[i] ?? "").padEnd(leftW);
+    const right = useTips ? (rightLines[i] ?? "") : "";
+    const gap = useTips ? ` ${paint("│")} ` : "";
+    const content = left + gap + right;
+    out.push(`${paint("│")} ${truncateToWidth(content, width - 4)} ${paint("│")}`);
+  }
+  out.push(paint("╰") + dim("─".repeat(Math.max(0, width - 2))) + paint("╯"));
+  return out.map((l) => truncateToWidth(l, width, ""));
+}
+
+function installHeader(pi: ExtensionAPI): void {
+  let header: Component | undefined;
+  pi.on("session_start", (_event, ctx) => {
+    if (!ctx.hasUI || ctx.mode !== "tui") return;
+    try {
+      ctx.ui.setHeader((tui) => {
+        const comp: Component = {
+          invalidate() {},
+          render(width) {
+            const model = ctx.model;
+            const thinking = pi.getThinkingLevel();
+            const cwd = ctx.cwd;
+            const commands = pi.getCommands();
+            return renderHeader(width, ctx.ui.theme, model, thinking, cwd, commands);
+          },
+        };
+        header = comp;
+        return comp;
+      });
+    } catch { /* best-effort */ }
+  });
+  pi.on("session_shutdown", () => { header = undefined; });
+}
+
+// ── Working indicator ──────────────────────────────────────────────────
+
+function installWorkingIndicator(pi: ExtensionAPI): void {
+  pi.on("session_start", (_event, ctx) => {
+    if (!ctx.hasUI) return;
+    try {
+      ctx.ui.setWorkingIndicator({
+        frames: [
+          ctx.ui.theme.fg("dim", "·"),
+          ctx.ui.theme.fg("muted", "•"),
+          ctx.ui.theme.fg("accent", "●"),
+          ctx.ui.theme.fg("muted", "•"),
+        ],
+        intervalMs: 120,
+      });
+    } catch { /* best-effort */ }
+  });
+}
+
+// ── Turn timing state ───────────────────────────────────────────────────
+
+let workingSince = 0;
+let workingTimer: ReturnType<typeof setInterval> | undefined;
+let turnStart = 0;
+let turnOutputTokens = 0;
+let turnGenerationMs = 0;
+let turnInputTokens = 0;
+let turnCost = 0;
+let turnFirstToken = 0;
+let turnStallCount = 0;
+let turnStallMs = 0;
+let turnLastTick = 0;
+const STALL_THRESHOLD_MS = 1000;
+
+function formatDuration(ms: number): string {
+  const s = Math.round(ms / 1000);
+  if (s < 60) return `${s}s`;
+  const de = Math.floor(s / 60);
+  return `${de}m ${s % 60}s`;
+}
+
+function formatTokens(n: number): string {
+  if (n < 1000) return String(n);
+  if (n < 10000) return `${(n / 1000).toFixed(1)}k`;
+  if (n < 1000000) return `${Math.round(n / 1000)}k`;
+  return `${(n / 1000000).toFixed(n < 10000000 ? 1 : 0)}M`;
+}
+
+function installTiming(pi: ExtensionAPI): void {
+  pi.on("session_start", () => {
+    workingSince = 0;
+    turnStart = 0;
+  });
+  pi.on("agent_start", () => {
+    workingSince = Date.now();
+    turnStart = Date.now();
+    turnOutputTokens = 0;
+    turnGenerationMs = 0;
+    turnInputTokens = 0;
+    turnCost = 0;
+    turnFirstToken = 0;
+    turnStallCount = 0;
+    turnStallMs = 0;
+    turnLastTick = 0;
+  });
+  pi.on("message_update", (event, ctx) => {
+    if (turnStart === 0) return;
+    const streamEvent = (event as any).assistantMessageEvent;
+    if (!streamEvent || streamEvent.delta?.length === 0) return;
+    const now = Date.now();
+    if (turnFirstToken === 0) {
+      turnFirstToken = now;
+      turnLastTick = now;
+      return;
+    }
+    const gap = now - turnLastTick;
+    if (gap >= STALL_THRESHOLD_MS) {
+      turnStallCount++;
+      turnStallMs += gap;
+    }
+    turnLastTick = now;
+  });
+  pi.on("message_end", (event, ctx) => {
+    if (turnStart === 0) return;
+    const msg = (event as any).message;
+    if (msg?.role !== "assistant" || !msg.usage) return;
+    turnOutputTokens += msg.usage.output || 0;
+    turnInputTokens += msg.usage.input || 0;
+    turnCost += msg.usage.cost?.total || 0;
+  });
+  pi.on("agent_settled", (_event, ctx) => {
+    workingSince = 0;
+    clearTimeout(workingTimer);
+    workingTimer = undefined;
+
+    if (turnStart > 0 && ctx.hasUI) {
+      const totalMs = Date.now() - turnStart;
+      const genMs = turnFirstToken > 0 ? Date.now() - turnFirstToken : 0;
+      const doneStr = formatDuration(totalMs);
+
+      // Build telemetry line
+      const theme = ctx.ui.theme;
+      const parts: string[] = [];
+
+      // TPS
+      if (turnOutputTokens > 0 && genMs > 0) {
+        const tps = (turnOutputTokens / (genMs / 1000)).toFixed(1);
+        parts.push(theme.fg("accent", `› TPS ${tps}`));
+      }
+
+      // TTFT
+      const ttft = turnFirstToken > 0 ? turnFirstToken - (turnStart > 0 ? turnStart : turnFirstToken) : 0;
+      if (ttft > 0) {
+        parts.push(theme.fg("text", `~ ${formatDuration(ttft)}`));
+      }
+
+      // Duration
+      parts.push(theme.fg("success", `+ ${doneStr}`));
+
+      // Tokens
+      if (turnInputTokens > 0 || turnOutputTokens > 0) {
+        parts.push(theme.fg("accent", `↑ ${formatTokens(turnInputTokens)}`));
+        parts.push(theme.fg("success", `↓ ${formatTokens(turnOutputTokens)}`));
+      }
+
+      // Stalls
+      if (turnStallCount > 0) {
+        parts.push(theme.fg("warning", `! stall ${turnStallCount}x ${formatDuration(turnStallMs)}`));
+      }
+
+      // Cost rate
+      if (turnCost > 0) {
+        parts.push(theme.fg("warning", `$${turnCost.toFixed(3)}`));
+      }
+
+      try {
+        ctx.ui.notify(parts.join(` ${theme.fg("dim", "|")} `), "info");
+      } catch { /* */ }
+
+      turnStart = 0;
+    }
+  });
+}
+
+// ── Cursor style ────────────────────────────────────────────────────────��──────────────────────────────────────
+
+function readGitBranch(cwd: string): string | undefined {
+  try {
+    const out = execSync("git rev-parse --abbrev-ref HEAD", { cwd, timeout: 2000, encoding: "utf-8" });
+    const branch = out.trim();
+    return branch && branch !== "HEAD" ? branch : undefined;
+  } catch { return undefined; }
+}
+
+function installCursor(pi: ExtensionAPI): void {
+  const seq = "\x1b[6 q"; // bar cursor
+  pi.on("session_start", (_event, ctx) => {
+    if (!ctx.hasUI || ctx.mode !== "tui") return;
+    try {
+      ctx.ui.setEditorComponent((tui) => {
+        const original = ctx.ui.getEditorComponent();
+        const base = original?.(tui, ctx.ui.theme, undefined as any);
+        if (base && typeof base === "object" && "handleInput" in (base as any)) {
+          (base as any).tui?.terminal?.write?.(seq);
+          tui.setShowHardwareCursor?.(true);
+        }
+        return base;
+      });
+    } catch { /* best-effort */ }
+  });
+  pi.on("session_shutdown", () => {
+    try { process.stdout.write("\x1b[0 q"); } catch { /* */ }
+  });
+}
+
+// ── RTK status styling ──────────────────────────────────────────────────
+
 function patchRtkStatus(): void {
   const proto = InteractiveMode?.prototype as any;
   if (!proto || proto[STATUS_PATCHED] || typeof proto.showStatus !== "function") return;
@@ -491,7 +756,20 @@ function patchFooter(): void {
   proto.render = function renderPiThemeFooter(this: any, width: number): string[] {
     const lines = fallbackRender(originalRender, this, width);
     try {
-      if (lines.length > 1) lines[1] = truncateToWidth(footerStatsLine(this.session, width), width, "");
+      if (lines.length > 1) {
+        const theme = (globalThis as any)[PI_THEME] as PiTheme;
+        const cwd = this.session?.sessionManager?.getCwd?.() ?? "";
+        const branch = cwd ? readGitBranch(cwd) : undefined;
+        const branchStr = branch ? fg(theme, "mdLink", `⎇ ${branch}`) : "";
+        const workingStr = workingSince > 0
+          ? fg(theme, "warning", `● ${formatDuration(Date.now() - workingSince)}`)
+          : "";
+        const extras = [branchStr, workingStr].filter(Boolean).join(" ");
+        const stats = footerStatsLine(this.session, width);
+        lines[1] = extras
+          ? truncateToWidth(`${fg(theme, "dim", extras)}  ${stats}`, width, "")
+          : truncateToWidth(stats, width, "");
+      }
       for (let i = 2; i < lines.length; i++) lines[i] = subtleFooterStatus(lines[i], width);
     } catch {
       return lines;
@@ -505,4 +783,8 @@ function patchFooter(): void {
 export default function piTheme(pi: ExtensionAPI): void {
   [patchChatLimit, patchTools, patchAssistant, patchInput, patchUserMessages, patchRtkStatus, patchFooter].forEach(safePatch);
   safePatch(() => registerChatToggle(pi));
+  safePatch(() => installHeader(pi));
+  safePatch(() => installTiming(pi));
+  safePatch(() => installWorkingIndicator(pi));
+  safePatch(() => installCursor(pi));
 }
