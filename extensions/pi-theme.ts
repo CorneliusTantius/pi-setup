@@ -1,8 +1,6 @@
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
-import { AssistantMessageComponent, CustomEditor, FooterComponent, InteractiveMode, ToolExecutionComponent, UserMessageComponent, VERSION } from "@earendil-works/pi-coding-agent";
-import { Component, CURSOR_MARKER, Text, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
-import { relative } from "node:path";
-import { execSync } from "node:child_process";
+import { AssistantMessageComponent, CustomEditor, FooterComponent, InteractiveMode, ToolExecutionComponent, UserMessageComponent } from "@earendil-works/pi-coding-agent";
+import { Text, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 
 const TOOL_PATCHED = Symbol.for("pi-theme:patched-tool-renderers");
 const ASSISTANT_PATCHED = Symbol.for("pi-theme:patched-assistant-bubble");
@@ -365,90 +363,6 @@ function registerChatToggle(pi: ExtensionAPI): void {
 
 // ── Header ──────────────────────────────────────────────────────────────
 
-const HEADER_LOGO = [
-  " ██████╗██╗",
-  "██╔═══╝╚██╗",
-  "██║      ██║",
-  "██║      ██║",
-  "╚██████╗██╔╝",
-  " ╚═════╝╚═╝",
-];
-
-function headerModelLabel(model: any, thinking: string): string {
-  const id = model?.id || "no-model";
-  return model?.reasoning && thinking !== "off" ? `${id} · ${thinking}` : id;
-}
-
-function headerCwd(cwd: string): string {
-  const home = process.env.HOME;
-  if (!home) return cwd;
-  const rel = relative(home, cwd);
-  return rel === "" || rel.startsWith("..") ? cwd : `~/${rel}`;
-}
-
-function headerPickTips(commands: readonly { name: string }[]): string[] {
-  const tips = ["grinding", "implement-it", "plan-n-breakdown", "open-pr", "rewind", "model", "compact"]
-    .filter((n) => commands.some((c) => c.name === n));
-  return tips.slice(0, 4).map((n) => `/${n}`);
-}
-
-function renderHeader(width: number, theme: any, model: any, thinking: string, cwd: string, commands: readonly { name: string }[]): string[] {
-  if (width < 30) return [theme.fg("dim", `Pi v${VERSION}`)];
-  const paint = (s: string) => theme.fg("accent", s);
-  const muted = (s: string) => theme.fg("muted", s);
-  const dim = (s: string) => theme.fg("dim", s);
-  const bold = (s: string) => theme.bold(s);
-
-  const logo = HEADER_LOGO;
-  const logoW = Math.max(...logo.map((l) => visibleWidth(l)));
-  const tips = headerPickTips(commands);
-  const modelLine = `${bold("model")} ${headerModelLabel(model, thinking)}`;
-  const dirLine = `${muted("cwd")} ${dim(headerCwd(cwd))}`;
-
-  const leftLines = [...logo, "", bold("Build great code"), modelLine, dirLine];
-  const rightLines = tips.length ? ["", paint(bold("Commands")), ...tips.map((t) => muted(t)), ""] : [];
-
-  const leftW = logoW + 1;
-  const rightW = rightLines.length ? Math.max(...rightLines.map((l: string) => visibleWidth(l))) + 1 : 0;
-  const totalW = leftW + (rightW > 0 ? 3 + rightW : 0);
-  const useTips = width >= totalW + 6;
-
-  const out: string[] = [paint("╭─") + dim(` Pi v${VERSION} `) + paint("─".repeat(Math.max(0, width - visibleWidth(` Pi v${VERSION} `) - 4))) + paint("╮")];
-  const rows = Math.max(leftLines.length, useTips ? rightLines.length : 0);
-  for (let i = 0; i < rows; i++) {
-    const left = (leftLines[i] ?? "").padEnd(leftW);
-    const right = useTips ? (rightLines[i] ?? "") : "";
-    const gap = useTips ? ` ${paint("│")} ` : "";
-    const content = left + gap + right;
-    out.push(`${paint("│")} ${truncateToWidth(content, width - 4)} ${paint("│")}`);
-  }
-  out.push(paint("╰") + dim("─".repeat(Math.max(0, width - 2))) + paint("╯"));
-  return out.map((l) => truncateToWidth(l, width, ""));
-}
-
-function installHeader(pi: ExtensionAPI): void {
-  let header: Component | undefined;
-  pi.on("session_start", (_event, ctx) => {
-    if (!ctx.hasUI || ctx.mode !== "tui") return;
-    try {
-      ctx.ui.setHeader((tui) => {
-        const comp: Component = {
-          invalidate() {},
-          render(width) {
-            const model = ctx.model;
-            const thinking = pi.getThinkingLevel();
-            const cwd = ctx.cwd;
-            const commands = pi.getCommands();
-            return renderHeader(width, ctx.ui.theme, model, thinking, cwd, commands);
-          },
-        };
-        header = comp;
-        return comp;
-      });
-    } catch { /* best-effort */ }
-  });
-  pi.on("session_shutdown", () => { header = undefined; });
-}
 
 // ── Working indicator ──────────────────────────────────────────────────
 
@@ -594,36 +508,6 @@ function installTiming(pi: ExtensionAPI): void {
   });
 }
 
-// ── Cursor style ────────────────────────────────────────────────────────��──────────────────────────────────────
-
-function readGitBranch(cwd: string): string | undefined {
-  try {
-    const out = execSync("git rev-parse --abbrev-ref HEAD", { cwd, timeout: 2000, encoding: "utf-8" });
-    const branch = out.trim();
-    return branch && branch !== "HEAD" ? branch : undefined;
-  } catch { return undefined; }
-}
-
-function installCursor(pi: ExtensionAPI): void {
-  const seq = "\x1b[6 q"; // bar cursor
-  pi.on("session_start", (_event, ctx) => {
-    if (!ctx.hasUI || ctx.mode !== "tui") return;
-    try {
-      ctx.ui.setEditorComponent((tui) => {
-        const original = ctx.ui.getEditorComponent();
-        const base = original?.(tui, ctx.ui.theme, undefined as any);
-        if (base && typeof base === "object" && "handleInput" in (base as any)) {
-          (base as any).tui?.terminal?.write?.(seq);
-          tui.setShowHardwareCursor?.(true);
-        }
-        return base;
-      });
-    } catch { /* best-effort */ }
-  });
-  pi.on("session_shutdown", () => {
-    try { process.stdout.write("\x1b[0 q"); } catch { /* */ }
-  });
-}
 
 // ── RTK status styling ──────────────────────────────────────────────────
 
@@ -783,8 +667,6 @@ function patchFooter(): void {
 export default function piTheme(pi: ExtensionAPI): void {
   [patchChatLimit, patchTools, patchAssistant, patchInput, patchUserMessages, patchRtkStatus, patchFooter].forEach(safePatch);
   safePatch(() => registerChatToggle(pi));
-  safePatch(() => installHeader(pi));
   safePatch(() => installTiming(pi));
   safePatch(() => installWorkingIndicator(pi));
-  safePatch(() => installCursor(pi));
 }
