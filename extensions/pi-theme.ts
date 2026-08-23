@@ -267,13 +267,6 @@ function patchAssistant(): void {
   proto[ASSISTANT_PATCHED] = true;
 }
 
-function formatTokens(count: number): string {
-  if (count < 1000) return String(count);
-  if (count < 10000) return `${(count / 1000).toFixed(1)}k`;
-  if (count < 1000000) return `${Math.round(count / 1000)}k`;
-  return `${(count / 1000000).toFixed(count < 10000000 ? 1 : 0)}M`;
-}
-
 function usageStats(session: any): string {
   let input = 0;
   let output = 0;
