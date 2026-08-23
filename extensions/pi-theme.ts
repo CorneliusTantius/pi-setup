@@ -333,7 +333,7 @@ function capChatContainer(chat: any): void {
       const hidden = children.length - CHAT_CHILD_LIMIT;
       this.children = children.slice(-CHAT_CHILD_LIMIT);
       try {
-        const notice = fg(getTheme(), "dim", truncateToWidth(`… ${hidden} older chat items hidden for typing speed`, width, "")););
+        const notice = fg(getTheme(), "dim", truncateToWidth(`… ${hidden} older chat items hidden for typing speed`, width, ""));
         return [notice, ...originalRender.call(this, width)];
       } finally {
         this.children = children;
