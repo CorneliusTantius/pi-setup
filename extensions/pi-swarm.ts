@@ -38,12 +38,7 @@ type RunResult = {
 function defaultConfig(): SwarmConfig {
   const defaultModel = "azure_ai/deepseek-v4-flash";
 
-  const base = [
-    "You are a small focused swarm agent.",
-    "Use low/medium effort, stay concise, and do only the assigned task.",
-    "Return findings, changed files, commands run, and any blockers.",
-    "Do not start broad refactors or extra work.",
-  ].join("\n");
+  const base = "Do only the assigned task. Return findings and blockers. Stay concise and straightforward.";
 
   return {
     defaultModel,
@@ -56,7 +51,7 @@ function defaultConfig(): SwarmConfig {
         model: defaultModel,
         thinking: "minimal",
         tools: ["read", "grep", "find", "ls"],
-        systemPrompt: `${base}\nYou scout the repo and report exact files, symbols, and next steps. Do not edit files.`,
+        systemPrompt: `${base}\nScout the repo. Find files, symbols, and change points. Read-only.`,
       },
       {
         name: "worker",
@@ -64,7 +59,7 @@ function defaultConfig(): SwarmConfig {
         model: defaultModel,
         thinking: "minimal",
         tools: ["read", "edit", "write", "bash", "grep", "find", "ls"],
-        systemPrompt: `${base}\nYou implement small localized code changes. Keep edits minimal and obvious.`,
+        systemPrompt: `${base}\nImplement the change. Keep edits minimal.`,
       },
       {
         name: "tester",
@@ -72,7 +67,7 @@ function defaultConfig(): SwarmConfig {
         model: defaultModel,
         thinking: "minimal",
         tools: ["read", "bash", "grep", "find", "ls", "edit"],
-        systemPrompt: `${base}\nYou run targeted tests, diagnose failures, and suggest or apply small fixes only when asked.`,
+        systemPrompt: `${base}\nRun tests, diagnose failures, suggest or apply fixes.`,
       },
       {
         name: "reviewer",
@@ -80,7 +75,7 @@ function defaultConfig(): SwarmConfig {
         model: defaultModel,
         thinking: "minimal",
         tools: ["read", "bash", "grep", "find", "ls"],
-        systemPrompt: `${base}\nYou review work. Prioritize bugs, regressions, missing tests, and simple fixes. Do not edit files.`,
+        systemPrompt: `${base}\nReview diffs for bugs, regressions, missing tests. Read-only.`,
       },
     ],
   };
@@ -131,6 +126,8 @@ async function runAgent(
     "--print",
     "--no-session",
     "--no-extensions",
+    "--no-skills",
+    "--no-prompt-templates",
     "--thinking", thinking,
   ];
   if (model) args.push("--model", model);
@@ -266,11 +263,12 @@ export default function swarmExtension(pi: ExtensionAPI) {
   pi.registerTool({
     name: "spawn_swarm",
     label: "Spawn Swarm",
-    description: "Spawn configured low/medium-thinking swarm agents. Use one agent+task or parallel tasks.",
-    promptSnippet: "Spawn configured swarm agents for isolated grunt work, scouting, testing, or review.",
+    description: "Spawn agents to do work in parallel. One agent+task or many tasks. Fire this for any independent subtask.",
+    promptSnippet: "Spawn agents for parallel work — scouting, implementing, testing, reviewing.",
     promptGuidelines: [
-      "Use spawn_swarm to delegate independent grunt-work tasks to small configured agents.",
-      "Keep spawn_swarm tasks specific and bounded; do not delegate broad planning or vague work.",
+      "Use spawn_swarm freely for any independent, bounded subtask.",
+      "Prefer spawning agents over doing work yourself when work can be parallelized.",
+      "Keep each task specific and bounded.",
     ],
     parameters: Type.Object({
       agent: Type.Optional(Type.String({ description: "Swarm agent name for single mode" })),

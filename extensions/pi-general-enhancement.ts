@@ -1,5 +1,5 @@
 /**
- * pi-general-enhancement — storm-breaker + edit retry + rewind.
+ * pi-general-enhancement — storm-breaker + edit retry.
  *
  * Model-agnostic improvements that work with any provider:
  *
@@ -10,9 +10,6 @@
  * 2. Edit retry with fuzzy matching — when edit fails, reads the file, does
  *    trim-tolerant block matching, and retries with real file bytes. Resolves
  *    ~60% of edit mismatches from whitespace/contamination differences.
- *
- * 3. Rewind — git-stash-based file snapshots before each turn. /rewind N
- *    restores files to before turn N. Disabled by default (set PI_REWIND_ENABLED=1).
  */
 
 import type {
@@ -22,12 +19,10 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { execSync } from "node:child_process";
 
 // ── Config ───────────────────────────────────────────────────────────────────
 
-const FAIL_THRESHOLD = Math.max(1, Number(process.env.PI_STORMBREAKER_THRESHOLD) || 3);
-const REWIND_ENABLED = ["1", "true", "yes"].includes((process.env.PI_REWIND_ENABLED || "").toLowerCase());
+const FAIL_THRESHOLD = 3;
 
 // ── Storm-breaker state ──────────────────────────────────────────────────────
 
@@ -130,34 +125,6 @@ function nearestBlock(content: string, oldText: string, ctx = 6): string {
   }).join("\n");
 }
 
-// ── Rewind state ─────────────────────────────────────────────────────────────
-
-interface Checkpoint {
-  turnIndex: number;
-  stashRef: string;
-  headSha: string;
-  timestamp: number;
-}
-
-const checkpoints: Map<number, Checkpoint> = new Map();
-let insideRepo = false;
-
-function checkGitRepo(cwd: string): boolean {
-  try {
-    const out = execSync("git rev-parse --is-inside-work-tree", { cwd, timeout: 2000, encoding: "utf-8" });
-    return out.trim() === "true";
-  } catch { return false; }
-}
-
-function createStashSnapshot(cwd: string): { stashRef: string; headSha: string } {
-  let stashRef = "";
-  let headSha = "";
-  try { stashRef = execSync("git stash create --include-untracked", { cwd, timeout: 5000, encoding: "utf-8" }).trim(); } catch { /* clean tree */ }
-  try { headSha = execSync("git rev-parse HEAD", { cwd, timeout: 2000, encoding: "utf-8" }).trim(); } catch { /* no commits */ }
-  return { stashRef, headSha };
-}
-
-// ── Entry ────────────────────────────────────────────────────────────────────
 
 export default function piGeneralEnhancement(pi: ExtensionAPI) {
   // ═══════════════════════════════════════════════════════════════════════
@@ -306,82 +273,5 @@ export default function piGeneralEnhancement(pi: ExtensionAPI) {
     }
 
     // count > 1: ambiguous match, leave default error
-  });
-
-  // ═══════════════════════════════════════════════════════════════════════
-  // Rewind (off by default)
-  // ═══════════════════════════════════════════════════════════════════════
-
-  if (!REWIND_ENABLED) return;
-
-  pi.on("session_start", async (_event: any, ctx: ExtensionContext) => {
-    insideRepo = checkGitRepo(ctx.cwd);
-  });
-
-  pi.on("turn_start", async (event: any, ctx: ExtensionContext) => {
-    if (!insideRepo) return;
-    const { stashRef, headSha } = createStashSnapshot(ctx.cwd);
-    checkpoints.set(event.turnIndex, { turnIndex: event.turnIndex, stashRef, headSha, timestamp: event.timestamp });
-    if (checkpoints.size > 100) {
-      const oldest = Math.min(...checkpoints.keys());
-      checkpoints.delete(oldest);
-    }
-  });
-
-  pi.registerCommand("rewind", {
-    description: "Rewind to a previous turn: /rewind N restores files to before turn N. Without N, lists checkpoints.",
-    handler: async (args: string, ctx: any) => {
-      if (!insideRepo) { ctx.ui.notify("Rewind requires a git repository", "warning"); return; }
-
-      const turnArg = args.trim();
-
-      if (!turnArg) {
-        if (checkpoints.size === 0) { ctx.ui.notify("No checkpoints recorded yet", "info"); return; }
-        const lines = ["Available rewind checkpoints:"];
-        for (const [turn, cp] of checkpoints) {
-          const time = new Date(cp.timestamp).toLocaleTimeString();
-          lines.push(`  Turn ${turn} (${time}, ${cp.stashRef ? "has changes" : "clean tree"})`);
-        }
-        lines.push("", "Use /rewind N to rewind to before turn N");
-        ctx.ui.notify(lines.join("\n"), "info");
-        return;
-      }
-
-      const targetTurn = Number.parseInt(turnArg, 10);
-      if (!Number.isFinite(targetTurn)) { ctx.ui.notify(`Invalid turn number: ${turnArg}`, "warning"); return; }
-
-      const checkpoint = checkpoints.get(targetTurn);
-      if (!checkpoint) {
-        ctx.ui.notify(`No checkpoint for turn ${targetTurn}. Available: ${[...checkpoints.keys()].join(", ")}`, "warning");
-        return;
-      }
-
-      try {
-        if (checkpoint.stashRef) {
-          execSync("git reset HEAD -- .", { cwd: ctx.cwd, timeout: 5000 });
-          execSync("git checkout -- .", { cwd: ctx.cwd, timeout: 5000 });
-          execSync("git clean -fd", { cwd: ctx.cwd, timeout: 5000 });
-          try {
-            const currentHead = execSync("git rev-parse HEAD", { cwd: ctx.cwd, timeout: 2000, encoding: "utf-8" }).trim();
-            if (currentHead && checkpoint.headSha && currentHead !== checkpoint.headSha) {
-              execSync(`git reset --hard ${checkpoint.headSha}`, { cwd: ctx.cwd, timeout: 5000 });
-            }
-          } catch { /* ignore */ }
-          execSync(`git stash apply ${checkpoint.stashRef}`, { cwd: ctx.cwd, timeout: 5000 });
-        } else {
-          execSync("git reset HEAD -- .", { cwd: ctx.cwd, timeout: 5000 });
-          execSync("git checkout -- .", { cwd: ctx.cwd, timeout: 5000 });
-          execSync("git clean -fd", { cwd: ctx.cwd, timeout: 5000 });
-        }
-      } catch (err) {
-        ctx.ui.notify(`Failed to restore files: ${err}`, "error");
-        return;
-      }
-
-      ctx.ui.notify(
-        `Rewound to before turn ${targetTurn}. Files restored from git stash.\nUse session tree (ctrl+t) to navigate conversation if needed.`,
-        "info",
-      );
-    },
   });
 }

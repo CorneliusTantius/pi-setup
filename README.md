@@ -16,9 +16,9 @@ Restart Pi or run `/reload` after installing. Use `pi config` to enable/disable 
 |-----------|------|-------------|
 | **RTK rewrite** | `extensions/pi-rtk-rewrite.ts` | Replaces `bash`, `read`, `write`, `edit` tools with RTK-optimized versions. Commands rewritten via RTK, output compacted (build/test/git/linter output summarized, ANSI stripped). |
 | **DeepSeek enhancement** | `extensions/pi-deepseek-enhancement.ts` | DeepSeek-specific fixes: cache prefix stability (strips reasoning/timestamps, sorts tool schemas), hashline editing (`edit_lines` tool), edit input repair (trim-tolerant matching), tool steering (first-tool hints, semantic-miss blocking). Auto-activates on DeepSeek models. |
-| **General enhancement** | `extensions/pi-general-enhancement.ts` | Model-agnostic: storm-breaker (breaks consecutive failure loops after N identical errors), edit retry with fuzzy matching, `/rewind` command (git-stash file snapshots per turn, off by default — set `PI_REWIND_ENABLED=1`). |
+| **General enhancement** | `extensions/pi-general-enhancement.ts` | Model-agnostic: storm-breaker (breaks consecutive failure loops after N identical errors, enhances error messages), edit retry with fuzzy matching (resolves ~60% of edit mismatches). | |
 | **Retry** | `extensions/pi-retry.ts` | Tags empty-detail provider errors, Codex WebSocket limit, and Codex generic errors so Pi's built-in auto-retry catches them. Adds 90s stall detection. |
-| **Swarm** | `extensions/pi-swarm.ts` | `spawn_swarm` tool — runs configured agents (scout, worker, tester, reviewer) as isolated `pi --mode json` subprocesses from `swarm.json`. Supports single and parallel (up to 6) tasks. |
+| **Swarm** | `extensions/pi-swarm.ts` | `spawn_swarm` tool — runs agents (scout, worker, tester, reviewer) as isolated `pi --mode json` subprocesses. Single or parallel (up to 6) tasks. | |
 | **System prompt** | `extensions/pi-sys-prompt.ts` | Overrides the system prompt with YAGNI/KISS/DRY principles + coding discipline. |
 | **Compact TUI theme** | `extensions/pi-theme.ts` | `/theme-history` toggle. Pad/simplify tool renderings, frame assistant responses, cap chat history to 99 items, relabel stats footer. |
 
@@ -64,18 +64,3 @@ prompts/
   open-pr.md
   plan-n-breakdown.md
 ```
-
-## Env vars reference
-
-| Variable | Default | For |
-|----------|---------|-----|
-| `PI_DEEPSEEK_PATTERN` | `deepseek` | Model name pattern for DeepSeek enhancement |
-| `PI_DEEPSEEK_EDIT_REPAIR` | enabled | Set to `0` to disable edit input repair |
-| `PI_STORMBREAKER_THRESHOLD` | `3` | Consecutive failure count before storm-breaker aborts |
-| `PI_REWIND_ENABLED` | `0` | Set to `1` to enable git-stash `/rewind` |
-| `PI_RTK_BIN` | `rtk` | RTK binary path |
-| `PI_RTK_REWRITE` | `1` | Set to `0` to disable RTK command rewriting |
-| `PI_RTK_COMPACT` | `1` | Set to `0` to disable output compaction |
-| `PI_RTK_NOTIFY` | `1` | Set to `0` to disable RTK rewrite notifications |
-| `PI_RTK_JSON` | `1` | Set to `0` to disable JSON compaction on read |
-| `PI_RTK_BASH_TIMEOUT` | `120000` | Bash timeout in ms |

@@ -19,7 +19,6 @@
  *    semantic-miss blocking (bash grep→Serena, bash cat→read, etc.).
  *
  * Auto-activates when model name contains "deepseek" (case-insensitive).
- * Set PI_DEEPSEEK_PATTERN env var for custom model matching.
  */
 
 import type {
@@ -34,8 +33,8 @@ import { resolve, dirname } from "node:path";
 
 // ── Config ───────────────────────────────────────────────────────────────────
 
-const MODEL_PATTERN = (process.env.PI_DEEPSEEK_PATTERN || "deepseek").toLowerCase();
-const EDIT_REPAIR_DISABLED = ["0", "false", "no", "off"].includes((process.env.PI_DEEPSEEK_EDIT_REPAIR || "").toLowerCase());
+const MODEL_PATTERN = "deepseek";
+const EDIT_REPAIR_DISABLED = false;
 
 function isDeepseek(model?: { id: string; provider: string; name: string }): boolean {
   if (!model) return false;
