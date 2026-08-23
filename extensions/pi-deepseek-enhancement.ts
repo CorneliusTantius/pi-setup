@@ -36,10 +36,16 @@ import { resolve, dirname } from "node:path";
 const MODEL_PATTERN = "deepseek";
 const EDIT_REPAIR_DISABLED = false;
 
+const LOWERCASE_POOL = new Set<string>();
+
 function isDeepseek(model?: { id: string; provider: string; name: string }): boolean {
   if (!model) return false;
+  const key = `${model.provider}|${model.id}|${model.name}`;
+  if (LOWERCASE_POOL.has(key)) return true;
   const haystack = `${model.provider} ${model.id} ${model.name}`.toLowerCase();
-  return haystack.includes(MODEL_PATTERN);
+  const result = haystack.includes(MODEL_PATTERN);
+  if (result) LOWERCASE_POOL.add(key);
+  return result;
 }
 
 // ── FNV-1a 12-bit (3 hex chars) ──────────────────────────────────────────────
@@ -59,17 +65,17 @@ const ANNOTATED_RE = /^\s*\d+:[0-9a-f]{3}\u2192/;
 
 function annotateContent(content: string, startLine = 1): string {
   const lines = content.split("\n");
-  const out: string[] = [];
+  const out: string[] = new Array(lines.length);
   let num = startLine;
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]!;
-    if (NOTICE_RE.test(line) || (line === "" && i + 1 < lines.length && NOTICE_RE.test(lines[i + 1]!))) {
-      out.push(line);
+    if (NOTICE_RE.test(line)) {
+      out[i] = line;
     } else if (ANNOTATED_RE.test(line)) {
-      out.push(line);
+      out[i] = line;
     } else {
       const n = String(num).padStart(5, " ");
-      out.push(`${n}:${lineHash(line)}\u2192${line}`);
+      out[i] = `${n}:${lineHash(line)}\u2192${line}`;
       num++;
     }
   }
@@ -82,9 +88,8 @@ const TIMESTAMP_RE = /(?:Current (?:date|time)(?:\s+is)?[:\s]\s*.*|Today(?:\s+is
 
 function stripTimestamps(prompt: string): string {
   TIMESTAMP_RE.lastIndex = 0;
-  if (!TIMESTAMP_RE.test(prompt)) return prompt;
-  TIMESTAMP_RE.lastIndex = 0;
-  return prompt.replace(TIMESTAMP_RE, "").replace(/\n{3,}/g, "\n\n");
+  const replaced = prompt.replace(TIMESTAMP_RE, "").replace(/\n{3,}/g, "\n\n");
+  return replaced.length < prompt.length ? replaced : prompt;
 }
 
 // ── Edit input repair ────────────────────────────────────────────────────────

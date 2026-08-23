@@ -15,10 +15,15 @@ function trimMsg(raw: string, max = 180): string {
 }
 
 function truncateOutput(text: string): string {
-	if (Buffer.byteLength(text, "utf8") <= OUTPUT_LIMIT_BYTES) return text;
-	let out = text.slice(0, OUTPUT_LIMIT_BYTES);
-	while (Buffer.byteLength(out, "utf8") > OUTPUT_LIMIT_BYTES) out = out.slice(0, -1);
-	return `${out}\n\n[truncated: output exceeded ${OUTPUT_LIMIT_BYTES} bytes]`;
+	const len = Buffer.byteLength(text, "utf8");
+	if (len <= OUTPUT_LIMIT_BYTES) return text;
+	let lo = Math.floor(OUTPUT_LIMIT_BYTES / 2), hi = Math.min(len, OUTPUT_LIMIT_BYTES * 2);
+	while (lo < hi) {
+		const mid = (lo + hi + 1) >> 1;
+		if (Buffer.byteLength(text.slice(0, mid), "utf8") <= OUTPUT_LIMIT_BYTES) lo = mid;
+		else hi = mid - 1;
+	}
+	return `${text.slice(0, lo)}\n\n[truncated: output exceeded ${OUTPUT_LIMIT_BYTES} bytes]`;
 }
 
 // ── ANSI stripping ──────────────────────────────────────────────────
@@ -33,12 +38,16 @@ function stripAnsi(text: string): string {
 // ── command detection ───────────────────────────────────────────────
 const ENV_PREFIX_RE = /^(?:[A-Za-z_][A-Za-z0-9_]*=(?:"[^"]*"|'[^']*'|[^\s]+)\s+)*/;
 
+const NEWLINE_RE = /\r?\n/;
+const SPLIT_RE = /[&|;]/;
+
 function firstSegment(command: string): string | null {
-	const first = command.split(/\r?\n/).map((l) => l.trim()).find(Boolean);
+	const idx = command.search(NEWLINE_RE);
+	const first = (idx === -1 ? command : command.slice(0, idx)).trim();
 	if (!first) return null;
 	const withoutEnv = first.replace(ENV_PREFIX_RE, "").trim();
 	if (!withoutEnv) return null;
-	return withoutEnv.split(/[&|;]/)[0]?.trim().toLowerCase() ?? null;
+	return withoutEnv.split(SPLIT_RE)[0]?.trim().toLowerCase() ?? null;
 }
 
 // ── build output ────────────────────────────────────────────────────
@@ -312,16 +321,17 @@ interface CompactState { text: string; techniques: string[] }
 
 function compactBash(text: string, command: string | null): CompactState {
 	const st: CompactState = { text, techniques: [] };
-	st.text = stripAnsi(st.text);
-	if (st.text !== text) st.techniques.push("ansi");
-	const apply = (fn: (t: string, c: string | null) => string | null, tech: string) => {
+	const stripped = stripAnsi(st.text);
+	if (stripped !== st.text) { st.text = stripped; st.techniques.push("ansi"); }
+	const apply = (fn: (t: string, c: string | null) => string | null, tech: string, guard?: (c: string | null) => boolean) => {
+		if (guard && !guard(command)) return;
 		const r = fn(st.text, command);
 		if (r !== null && r !== st.text) { st.text = r; st.techniques.push(tech); }
 	};
-	apply(filterBuildOutput, "build");
-	apply(aggregateTestOutput, "test");
-	apply(compactGitOutput, "git");
-	apply(aggregateLinterOutput, "linter");
+	apply(filterBuildOutput, "build", isBuildCmd);
+	if (isTestCmd(command)) apply(aggregateTestOutput, "test", () => true);
+	if (isGitCmd(command)) apply(compactGitOutput, "git", () => true);
+	if (isLintCmd(command)) apply(aggregateLinterOutput, "linter", () => true);
 	return st;
 }
 

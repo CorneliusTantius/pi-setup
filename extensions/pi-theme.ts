@@ -23,6 +23,12 @@ const OSC133_ZONE_START = "\x1b]133;A\x07";
 const OSC133_ZONE_END = "\x1b]133;B\x07";
 const OSC133_ZONE_FINAL = "\x1b]133;C\x07";
 
+// Cache theme reference
+function getTheme(): PiTheme {
+  return (globalThis as any)[PI_THEME];
+}
+const _t = () => getTheme();
+
 interface PiTheme {
   fg?: (key: string, text: string) => string;
   bg?: (key: string, text: string) => string;
@@ -40,7 +46,7 @@ const clip = (value: unknown): string => {
 const lastName = (name: string): string => String(name || "").split(".").pop()!;
 const stripAnsi = (line: string): string => String(line).replace(ANSI_RE, "").replace(OSC_RE, "");
 const trimLeft = (line: string): string => line.replace(/^((?:\x1b\[[0-9;]*m)*)\s+/, "$1");
-const rail = (theme: PiTheme = (globalThis as any)[PI_THEME]): string => fg(theme, "dim", "┆");
+const rail = (): string => fg(getTheme(), "dim", "┆"););
 function fg(theme: PiTheme | undefined | null, key: string, text: string): string {
   try {
     return theme?.fg?.(key, text) ?? text;
@@ -117,22 +123,21 @@ function summarizeParallel({ tool_uses: uses }: { tool_uses?: Array<{ recipient_
   return Array.isArray(uses) ? clip(`${uses.length} tools: ${uses.map((use) => use.recipient_name || use.name || "tool").join(", ")}`) : "";
 }
 
-function clearToolBackground(theme: PiTheme): void {
-  for (const target of [theme, (globalThis as any)[PI_THEME]].filter(Boolean)) {
-    for (const key of TOOL_BG_KEYS) {
-      if (target.bgColors instanceof Map) target.bgColors.set(key, "\x1b[49m");
-      else target.bgColors && (target.bgColors[key] = "\x1b[49m");
-    }
+function clearToolBackground(): void {
+  const theme = getTheme();
+  for (const key of TOOL_BG_KEYS) {
+    if (theme.bgColors instanceof Map) theme.bgColors.set(key, "\x1b[49m");
+    else theme.bgColors && (theme.bgColors[key] = "\x1b[49m");
   }
 }
 
 function toolLine(theme: PiTheme, name: string, value: string, context?: { isError?: boolean; isPartial?: boolean }): Text {
-  clearToolBackground(theme);
+  clearToolBackground();
   const status = context?.isError ? "error" : context?.isPartial === false ? "success" : "running";
   const color = status === "error" ? "error" : status === "running" ? "warning" : "success";
   const icon = status === "error" ? "✗" : status === "running" ? "›" : "✓";
   const tool = status === "error" ? fg(theme, "error", name) : fg(theme, "dim", name);
-  return new Text(`${rail(theme)} ${fg(theme, color, icon)} ${tool}${value ? ` ${fg(theme, "dim", value)}` : ""}`, 0, 0);
+  return new Text(`${rail()} ${fg(theme, color, icon)} ${tool}${value ? ` ${fg(theme, "dim", value)}` : ""}`, 0, 0);
 }
 
 function trimBlank(lines: string[]): string[] {
@@ -153,7 +158,7 @@ function hasAnsiCode(line: string, code: number): boolean {
 function isThinkingLine(line: string): boolean {
   if (hasAnsiCode(line, 3)) return true;
   try {
-    const ansi = (globalThis as any)[PI_THEME]?.getFgAnsi?.("thinkingText");
+    const ansi = getTheme()?.getFgAnsi?.("thinkingText");
     return Boolean(ansi && line.includes(ansi));
   } catch {
     return false;
@@ -284,7 +289,7 @@ function usageStats(session: any): string {
 }
 
 function contextBar(session: any): string {
-  const theme = (globalThis as any)[PI_THEME] as PiTheme;
+  const theme = getTheme();
   const percent = session.getContextUsage?.()?.percent;
   const known = percent !== null && percent !== undefined;
   const safePercent = known ? Math.max(0, Math.min(100, percent)) : 0;
@@ -300,11 +305,12 @@ function modelLabel({ state }: { state: any }): string {
 }
 
 function footerStatsLine(session: any, width: number): string {
+  const theme = getTheme();
   const left = [usageStats(session), contextBar(session)].filter(Boolean).join(" ");
   const right = modelLabel(session);
   const room = width - visibleWidth(left) - visibleWidth(right);
   const line = room >= 2 ? left + " ".repeat(room) + right : truncateToWidth(`${left} ${right}`, width, "");
-  return fg((globalThis as any)[PI_THEME], "dim", line);
+  return fg(theme, "dim", line);
 }
 
 function subtleFooterStatus(line: string, width: number): string {
@@ -313,7 +319,7 @@ function subtleFooterStatus(line: string, width: number): string {
     .replace(/\p{Extended_Pictographic}/gu, "")
     .replace(/\s+/g, " ")
     .trim();
-  return fg((globalThis as any)[PI_THEME], "dim", truncateToWidth(text, width, ""));
+  return fg(getTheme(), "dim", truncateToWidth(text, width, ""));
 }
 
 function capChatContainer(chat: any): void {
@@ -327,7 +333,7 @@ function capChatContainer(chat: any): void {
       const hidden = children.length - CHAT_CHILD_LIMIT;
       this.children = children.slice(-CHAT_CHILD_LIMIT);
       try {
-        const notice = fg((globalThis as any)[PI_THEME], "dim", truncateToWidth(`… ${hidden} older chat items hidden for typing speed`, width, ""));
+        const notice = fg(getTheme(), "dim", truncateToWidth(`… ${hidden} older chat items hidden for typing speed`, width, "")););
         return [notice, ...originalRender.call(this, width)];
       } finally {
         this.children = children;
@@ -639,7 +645,7 @@ function patchRtkStatus(): void {
       if (!this.lastStatusText) return;
       const isRtk = String(message).startsWith("RTK rewrite:");
       this.lastStatusText.paddingX = isRtk ? PAD.length : 1;
-      if (isRtk) this.lastStatusText.setText?.(`${rail()} ${fg((globalThis as any)[PI_THEME], "dim", stripAnsi(message))}`);
+      if (isRtk) this.lastStatusText.setText?.(`${rail()} ${fg(getTheme(), "dim", stripAnsi(message))}`);
       this.lastStatusText.invalidate?.();
     } catch {
       // Ignore styling failures; the status already rendered.
@@ -650,7 +656,7 @@ function patchRtkStatus(): void {
 }
 
 function framedTop(label: string, width: number, { align = "left", labelColor = "accent", borderColor = "borderMuted" }: { align?: string; labelColor?: string; borderColor?: string } = {}): string {
-  const theme = (globalThis as any)[PI_THEME] as PiTheme;
+  const theme = getTheme();
   const border = (text: string) => fg(theme, borderColor, text);
   const title = fg(theme, labelColor, ` ${label} `);
   const fill = border("─".repeat(Math.max(0, width - visibleWidth(` ${label} `) - 3)));
@@ -660,11 +666,11 @@ function framedTop(label: string, width: number, { align = "left", labelColor = 
 }
 
 function framedBottom(width: number, borderColor = "borderMuted"): string {
-  return fg((globalThis as any)[PI_THEME], borderColor, `╰${"─".repeat(Math.max(0, width - 2))}╯`);
+  return fg(getTheme(), borderColor, `╰${"─".repeat(Math.max(0, width - 2))}╯`);
 }
 
 function framedLine(line: string, width: number, color = "", borderColor = "borderMuted"): string {
-  const theme = (globalThis as any)[PI_THEME] as PiTheme;
+  const theme = getTheme();
   const left = fg(theme, borderColor, "│ ");
   const right = fg(theme, borderColor, " │");
   const text = color ? fg(theme, color, line) : line;
@@ -757,7 +763,7 @@ function patchFooter(): void {
     const lines = fallbackRender(originalRender, this, width);
     try {
       if (lines.length > 1) {
-        const theme = (globalThis as any)[PI_THEME] as PiTheme;
+        const theme = getTheme();
         const cwd = this.session?.sessionManager?.getCwd?.() ?? "";
         const branch = cwd ? readGitBranch(cwd) : undefined;
         const branchStr = branch ? fg(theme, "mdLink", `⎇ ${branch}`) : "";
