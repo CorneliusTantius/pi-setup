@@ -492,7 +492,7 @@ export default function rtkRewriteExtension(pi: ExtensionAPI) {
 				const decision = await rewriteCommand(pi, command);
 				if (decision.changed) {
 					command = decision.rewritten;
-				}	}
+				}
 			}
 
 			onUpdate?.({ content: [{ type: "text", text: `$ ${command}` }] });
