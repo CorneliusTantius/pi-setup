@@ -1,6 +1,7 @@
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { AssistantMessageComponent, CustomEditor, FooterComponent, InteractiveMode, ToolExecutionComponent, UserMessageComponent, VERSION } from "@earendil-works/pi-coding-agent";
 import { Component, CURSOR_MARKER, Text, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
+import { relative } from "node:path";
 import { execSync } from "node:child_process";
 
 const TOOL_PATCHED = Symbol.for("pi-theme:patched-tool-renderers");
