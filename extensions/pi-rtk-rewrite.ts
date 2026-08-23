@@ -491,9 +491,8 @@ export default function rtkRewriteExtension(pi: ExtensionAPI) {
 			if (await checkRtk(pi)) {
 				const decision = await rewriteCommand(pi, command);
 				if (decision.changed) {
-					if (ctx.hasUI) ctx.ui.notify(`rtk: ${trimMsg(command, 60)} → ${trimMsg(decision.rewritten, 60)}`, "info");
 					command = decision.rewritten;
-				}
+				}	}
 			}
 
 			onUpdate?.({ content: [{ type: "text", text: `$ ${command}` }] });
