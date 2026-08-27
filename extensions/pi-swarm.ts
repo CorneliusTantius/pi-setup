@@ -139,7 +139,7 @@ async function runAgent(
     const child = spawn(invocation.command, invocation.args, {
       cwd,
       stdio: ["ignore", "pipe", "pipe"],
-      timeout: timeoutMs,
+      detached: true, // own process group so we can kill the whole tree below
     });
 
     let stdout = "";
@@ -147,10 +147,40 @@ async function runAgent(
     let finalOutput = "";
     let buffer = "";
     let settled = false;
+    let timeoutTimer: NodeJS.Timeout | undefined;
+    let hardKillTimer: NodeJS.Timeout | undefined;
+
+    // Kill the entire process group. spawn()'s own timeout and child.kill() only hit
+    // the direct child; grandchildren (LLM HTTP client, the bash/git the worker/tester
+    // agents run) would orphan and leak memory as zombies until the OS reaps them.
+    const killGroup = (sig: NodeJS.Signals) => {
+      if (!child.pid) return;
+      try {
+        process.kill(-child.pid, sig);
+      } catch {
+        try { child.kill(sig); } catch {}
+      }
+    };
+
+    const clearTimers = () => {
+      if (timeoutTimer) clearTimeout(timeoutTimer);
+      if (hardKillTimer) clearTimeout(hardKillTimer);
+      timeoutTimer = undefined;
+      hardKillTimer = undefined;
+    };
+
+    // After a graceful SIGTERM, force-kill anything still alive in the group.
+    const scheduleHardKill = () => {
+      if (hardKillTimer) return;
+      hardKillTimer = setTimeout(() => killGroup("SIGKILL"), 5000);
+      hardKillTimer.unref?.();
+    };
 
     const settle = (result: RunResult) => {
       if (settled) return;
       settled = true;
+      clearTimers();
+      killGroup("SIGKILL"); // reap the whole tree even if close/error already fired
       resolve(result);
     };
 
@@ -192,6 +222,7 @@ async function runAgent(
 
     child.on("error", (error: NodeJS.ErrnoException) => {
       if (error.code === "ETIMEDOUT" || error.message?.includes("timeout")) {
+        killGroup("SIGKILL");
         settle({
           agent: agentName,
           task,
@@ -216,10 +247,32 @@ async function runAgent(
     });
 
     if (signal) {
-      const abort = () => child.kill("SIGTERM");
+      const abort = () => {
+        killGroup("SIGTERM");
+        scheduleHardKill();
+      };
       if (signal.aborted) abort();
       else signal.addEventListener("abort", abort, { once: true });
     }
+
+    // Hard timeout managed here: spawn()'s own timeout only kills the direct child.
+    timeoutTimer = setTimeout(() => {
+      killGroup("SIGTERM");
+      scheduleHardKill();
+      if (!settled) {
+        settle({
+          agent: agentName,
+          task,
+          exitCode: 124,
+          output: `Agent timed out after ${formatTime(timeoutMs)}.`,
+          stderr: `Timeout after ${formatTime(timeoutMs)}.`,
+          model: model || undefined,
+          thinking,
+          timedOut: true,
+        });
+      }
+    }, timeoutMs);
+    timeoutTimer.unref?.();
   });
 }
 
