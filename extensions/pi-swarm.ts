@@ -5,7 +5,7 @@ import { Type } from "typebox";
 
 const MAX_PARALLEL = 6;
 const OUTPUT_LIMIT = 30_000;
-const DEFAULT_TIMEOUT_MS = 120_000;
+const DEFAULT_TIMEOUT_MS = 300_000;
 const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 
 type ThinkingLevel = (typeof THINKING_LEVELS)[number];
@@ -148,7 +148,6 @@ async function runAgent(
     let buffer = "";
     let settled = false;
     let timeoutTimer: NodeJS.Timeout | undefined;
-    let hardKillTimer: NodeJS.Timeout | undefined;
 
     // Kill the entire process group. spawn()'s own timeout and child.kill() only hit
     // the direct child; grandchildren (LLM HTTP client, the bash/git the worker/tester
@@ -164,16 +163,7 @@ async function runAgent(
 
     const clearTimers = () => {
       if (timeoutTimer) clearTimeout(timeoutTimer);
-      if (hardKillTimer) clearTimeout(hardKillTimer);
       timeoutTimer = undefined;
-      hardKillTimer = undefined;
-    };
-
-    // After a graceful SIGTERM, force-kill anything still alive in the group.
-    const scheduleHardKill = () => {
-      if (hardKillTimer) return;
-      hardKillTimer = setTimeout(() => killGroup("SIGKILL"), 5000);
-      hardKillTimer.unref?.();
     };
 
     const settle = (result: RunResult) => {
@@ -248,8 +238,19 @@ async function runAgent(
 
     if (signal) {
       const abort = () => {
-        killGroup("SIGTERM");
-        scheduleHardKill();
+        // Kill the whole group immediately so Esc never leaves a hanging swarm.
+        killGroup("SIGKILL");
+        if (!settled) {
+          settle({
+            agent: agentName,
+            task,
+            exitCode: 130,
+            output: "Agent aborted by user (Esc).",
+            stderr: "",
+            model: model || undefined,
+            thinking,
+          });
+        }
       };
       if (signal.aborted) abort();
       else signal.addEventListener("abort", abort, { once: true });
@@ -257,8 +258,7 @@ async function runAgent(
 
     // Hard timeout managed here: spawn()'s own timeout only kills the direct child.
     timeoutTimer = setTimeout(() => {
-      killGroup("SIGTERM");
-      scheduleHardKill();
+      killGroup("SIGKILL");
       if (!settled) {
         settle({
           agent: agentName,
