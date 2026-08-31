@@ -22,6 +22,7 @@
  */
 
 import type {
+  BuildSystemPromptOptions,
   ExtensionAPI,
   ExtensionContext,
   ToolDefinition,
@@ -368,9 +369,200 @@ const editLinesTool: ToolDefinition = {
   },
 };
 
+// ────────────────────────────────────────────────────────────────────────────
+// Cache prefix stability (ported from pi-cache-optimizer, DeepSeek subset)
+//
+// DeepSeek's prompt cache is a prefix cache: it only hits when the leading
+// tokens are byte-identical across turns. Anything volatile near the front of
+// the system prompt (tool order, timestamps, trellis session-overview churn)
+// nukes the hit. These helpers move stable content (tools, guidelines, custom
+// prompt, AGENTS.md) ahead of dynamic content so the cached prefix stays hot.
+// ────────────────────────────────────────────────────────────────────────────
+
+const STABLE_CANDIDATE_MIN_LENGTH = 8;
+const MAX_CACHE_KEY_LENGTH = 64;
+
+type StableOpts = Pick<
+  BuildSystemPromptOptions,
+  "customPrompt" | "appendSystemPrompt" | "selectedTools" | "toolSnippets" | "promptGuidelines" | "contextFiles" | "skills"
+>;
+
+function isStableContextFilePath(filePath: string): boolean {
+  const normalized = filePath.replace(/\\/g, "/").toLowerCase();
+  const name = normalized.split("/").pop();
+  return (
+    name === "agents.md" || name === "claude.md" || name === "gemini.md" ||
+    normalized.startsWith(".trellis/spec/") || normalized.includes("/.trellis/spec/")
+  );
+}
+
+function isNonEmptyStr(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+
+
+function escapeXml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;").replace(/'/g, "&apos;");
+}
+
+function remarketSkillsXml(skills: NonNullable<StableOpts["skills"]>): string {
+  const visible = skills.filter((s) => !s.disableModelInvocation);
+  if (visible.length === 0) return "";
+  const lines: string[] = [
+    "\n\nThe following skills provide specialized instructions for specific tasks. Use the read tool to load a skill's file when the task matches its description.",
+    "<available_skills>",
+  ];
+  for (const s of visible) {
+    lines.push("  <skill>");
+    lines.push(`    <name>${escapeXml(s.name)}</name>`);
+    lines.push(`    <description>${escapeXml(s.description)}</description>`);
+    lines.push(`    <location>${escapeXml(s.filePath)}</location>`);
+    lines.push("  </skill>");
+  }
+  lines.push("</available_skills>");
+  return lines.join("\n");
+}
+
+function buildStableCandidates(opts: StableOpts): string[] {
+  const candidates: string[] = [];
+  if (opts.customPrompt) candidates.push(opts.customPrompt);
+  if (opts.appendSystemPrompt) candidates.push(opts.appendSystemPrompt);
+
+  const tools = opts.selectedTools ?? ["read", "bash", "edit", "write"];
+  const toolLines = tools
+    .filter((name) => opts.toolSnippets?.[name])
+    .map((name) => `- ${name}: ${opts.toolSnippets?.[name]}`);
+  if (toolLines.length > 0) candidates.push(`Available tools:\n${toolLines.join("\n")}`);
+
+  for (const guideline of opts.promptGuidelines ?? []) {
+    const normalized = guideline.trim();
+    if (normalized.length > 0) candidates.push(`- ${normalized}`);
+  }
+
+  for (const file of opts.contextFiles ?? []) {
+    if (!isStableContextFilePath(file.path)) continue;
+    candidates.push(`## ${file.path}\n\n${file.content}`);
+    candidates.push(file.content);
+  }
+
+  if (opts.skills && opts.skills.length > 0) {
+    candidates.push(remarketSkillsXml(opts.skills));
+  }
+  return candidates;
+}
+
+/** Strip per-turn churn from the trellis `<session-overview>` block. */
+function stripSessionOverviewChurn(prompt: string): string {
+  const startTag = "<session-overview>";
+  const endTag = "</session-overview>";
+  const startIdx = prompt.indexOf(startTag);
+  if (startIdx === -1) return prompt;
+  const endIdx = prompt.indexOf(endTag, startIdx + startTag.length);
+  if (endIdx === -1) return prompt;
+  const before = prompt.slice(0, startIdx + startTag.length);
+  const inner = prompt.slice(startIdx + startTag.length, endIdx);
+  const after = prompt.slice(endIdx);
+  const cleaned = inner
+    .replace(/\n## RECENT COMMITS\n[\s\S]*?(?=\n## |$)/, "")
+    .replace(/\nWorking directory:[^\n]*/g, "")
+    .replace(/\nLine count:[^\n]*/g, "");
+  return before + cleaned + after;
+}
+
+/** Extract structural markers so a failed reorder can fall back safely. */
+function extractStructuralMarkers(prompt: string): Set<string> {
+  const markers = new Set<string>();
+  for (const m of prompt.matchAll(/<([a-z][a-z0-9_-]*)>/gi)) markers.add(m[1].toLowerCase());
+  for (const m of prompt.matchAll(/<\/([a-z][a-z0-9_-]*)>/gi)) markers.add(`/${m[1].toLowerCase()}`);
+  for (const m of prompt.matchAll(/<!--\s*([A-Z][A-Z0-9_-]*):(START|END)\s*-->/g)) markers.add(`${m[1]}:${m[2]}`);
+  return markers;
+}
+
+function optimizeSystemPrompt(
+  original: string,
+  opts: StableOpts,
+): { systemPrompt: string; changed: boolean } {
+  const seen = new Set<string>();
+  const candidates: string[] = [];
+  for (const c of buildStableCandidates(opts)) {
+    const part = c.trim();
+    if (!part || part.length < STABLE_CANDIDATE_MIN_LENGTH || seen.has(part)) continue;
+    seen.add(part);
+    candidates.push(part);
+  }
+
+  // Count each candidate's occurrences against ONE immutable snapshot. Candidates
+  // can be nested (a context block also contains its bare content); deleting the
+  // full block can make the dynamic copy of its bare content appear unique, so
+  // recomputing counts after each removal is unsafe.
+  const initialRemainder = original;
+  const occurrenceCount = new Map<string, number>();
+  for (const part of candidates) {
+    let count = 0;
+    let from = 0;
+    while (from < initialRemainder.length) {
+      const idx = initialRemainder.indexOf(part, from);
+      if (idx < 0) break;
+      count++;
+      if (count > 1) break;
+      from = idx + 1;
+    }
+    occurrenceCount.set(part, count);
+  }
+
+  // Only lift candidates that occur exactly once (unambiguous, stable).
+  const stableParts: string[] = [];
+  let rest = original;
+  for (const part of candidates) {
+    if (occurrenceCount.get(part) !== 1) continue;
+    const first = rest.indexOf(part);
+    if (first < 0) continue;
+    stableParts.push(part);
+    rest = rest.slice(0, first) + rest.slice(first + part.length);
+  }
+
+  if (stableParts.length === 0) return { systemPrompt: original, changed: false };
+
+  const stablePrefix = stableParts.join("\n\n");
+  const dynamicRemainder = rest.trim();
+  const systemPrompt =
+    stablePrefix + (dynamicRemainder.length > 0 ? "\n\n---\n\n" + dynamicRemainder : "");
+
+  // Integrity guard: never ship a prompt that lost a structural marker.
+  const originalMarkers = extractStructuralMarkers(original);
+  const resultMarkers = extractStructuralMarkers(systemPrompt);
+  for (const m of originalMarkers) {
+    if (!resultMarkers.has(m)) return { systemPrompt: original, changed: false };
+  }
+
+  return { systemPrompt, changed: true };
+}
+
+function clampCacheKey(key: string | undefined): string | undefined {
+  const normalized = key?.trim();
+  if (!normalized) return undefined;
+  const chars = Array.from(normalized);
+  return chars.length <= MAX_CACHE_KEY_LENGTH ? normalized : chars.slice(0, MAX_CACHE_KEY_LENGTH).join("");
+}
+
+function hasEffectiveCacheKey(record: Record<string, unknown>): boolean {
+  return isNonEmptyStr(record.prompt_cache_key) || isNonEmptyStr(record.promptCacheKey);
+}
+
+function addOpenAIPromptCacheKey(payload: unknown, cacheKey: string | undefined): unknown | undefined {
+  const record = payload as Record<string, unknown> | null | undefined;
+  const normalized = clampCacheKey(cacheKey);
+  if (!record || !normalized || hasEffectiveCacheKey(record)) return undefined;
+  return { ...record, prompt_cache_key: normalized };
+}
+
 // ── Entry ────────────────────────────────────────────────────────────────────
 
 export default function piDeepseekEnhancement(pi: ExtensionAPI) {
+
   // ── Hook: annotate read output with hashes ──────────────────────────
   pi.on("tool_result", async (event: ToolResultEvent, ctx: ExtensionContext) => {
     if (!isDeepseek(ctx.model)) return;
@@ -526,30 +718,52 @@ export default function piDeepseekEnhancement(pi: ExtensionAPI) {
     }
   });
 
-  // ── Cache: sort tool schemas deterministically ──────────────────────
+  // ── Cache: stable-prefix system prompt (churn strip + reorder) ─────
+  // Move stable content (tools, guidelines, custom prompt, AGENTS.md) before
+  // dynamic content so DeepSeek's prefix cache stays hot. Also strip
+  // timestamps and trellis session-overview churn (RECENT COMMITS, working
+  // dir, line count) that otherwise poison the prefix.
+  pi.on("before_agent_start", async (event, _ctx: ExtensionContext) => {
+    if (!isDeepseek(_ctx.model)) return;
+
+    const opts: StableOpts = event.systemPromptOptions ?? {};
+    let systemPrompt = event.systemPrompt;
+
+    const stripped = stripSessionOverviewChurn(systemPrompt);
+    if (stripped !== systemPrompt) systemPrompt = stripped;
+
+    const noTs = stripTimestamps(systemPrompt);
+    if (noTs !== systemPrompt) systemPrompt = noTs;
+
+    const optimized = optimizeSystemPrompt(systemPrompt, opts);
+    if (optimized.changed) systemPrompt = optimized.systemPrompt;
+
+    return { systemPrompt };
+  });
+
+  // ── Cache: deterministic tool order + session cache key ─────────────
+  // Sorting tools and scaffolding a stable prompt_cache_key both keep the
+  // request prefix stable so the proxy's DeepSeek cache can hit.
   pi.on("before_provider_request", async (event, ctx: ExtensionContext) => {
     if (!isDeepseek(ctx.model)) return;
     const payload = event.payload as Record<string, unknown> | undefined;
-    if (!payload || !Array.isArray(payload.tools)) return;
+    if (!payload) return;
 
-    (payload.tools as unknown[]).sort((a, b) => {
-      const ta = a as Record<string, unknown> | undefined;
-      const tb = b as Record<string, unknown> | undefined;
-      const fnA = ta?.function as Record<string, unknown> | undefined;
-      const fnB = tb?.function as Record<string, unknown> | undefined;
-      const nameA = (fnA?.name as string) ?? (ta?.name as string) ?? "";
-      const nameB = (fnB?.name as string) ?? (tb?.name as string) ?? "";
-      return nameA.localeCompare(nameB);
-    });
-  });
-
-  // ── Cache: strip timestamps from system prompt ──────────────────────
-  pi.on("before_agent_start", async (event, ctx: ExtensionContext) => {
-    if (!isDeepseek(ctx.model)) return;
-    const cleaned = stripTimestamps(event.systemPrompt);
-    if (cleaned !== event.systemPrompt) {
-      return { systemPrompt: cleaned };
+    if (Array.isArray(payload.tools)) {
+      (payload.tools as unknown[]).sort((a, b) => {
+        const ta = a as Record<string, unknown> | undefined;
+        const tb = b as Record<string, unknown> | undefined;
+        const fnA = ta?.function as Record<string, unknown> | undefined;
+        const fnB = tb?.function as Record<string, unknown> | undefined;
+        const nameA = (fnA?.name as string) ?? (ta?.name as string) ?? "";
+        const nameB = (fnB?.name as string) ?? (tb?.name as string) ?? "";
+        return nameA.localeCompare(nameB);
+      });
     }
+
+    const sessionId = ctx.sessionManager?.getSessionId?.();
+    const withKey = addOpenAIPromptCacheKey(payload, sessionId ?? undefined);
+    return withKey === undefined ? undefined : withKey;
   });
 
   // ── Tool steering: semantic-miss blocking + first-tool hints ────────
