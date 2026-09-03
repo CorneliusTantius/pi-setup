@@ -1,5 +1,7 @@
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
@@ -11,13 +13,11 @@ const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "ma
 type ThinkingLevel = (typeof THINKING_LEVELS)[number];
 
 type SwarmConfig = {
-  defaultModel?: string;
   defaultThinking?: ThinkingLevel;
   timeoutMs?: number;
   agents: Array<{
     name: string;
     description: string;
-    model?: string | null;
     thinking?: ThinkingLevel;
     tools?: string[];
     systemPrompt: string;
@@ -36,19 +36,15 @@ type RunResult = {
 };
 
 function defaultConfig(): SwarmConfig {
-  const defaultModel = "openai-codex/gpt-5.6-luna";
-
   const base = "Do only the assigned task. Return findings and blockers. Stay concise and straightforward.";
 
   return {
-    defaultModel,
     defaultThinking: "minimal",
     timeoutMs: DEFAULT_TIMEOUT_MS,
     agents: [
       {
         name: "scout",
         description: "Read-only code scout for locating files, APIs, and likely change points.",
-        model: defaultModel,
         thinking: "minimal",
         tools: ["read", "grep", "find", "ls"],
         systemPrompt: `${base}\nScout the repo. Find files, symbols, and change points. Read-only.`,
@@ -56,7 +52,6 @@ function defaultConfig(): SwarmConfig {
       {
         name: "worker",
         description: "Small implementation worker for boring localized changes.",
-        model: defaultModel,
         thinking: "minimal",
         tools: ["read", "edit", "write", "bash", "grep", "find", "ls"],
         systemPrompt: `${base}\nImplement the change. Keep edits minimal.`,
@@ -64,7 +59,6 @@ function defaultConfig(): SwarmConfig {
       {
         name: "tester",
         description: "Test runner/debugger for failures, logs, and small fixes.",
-        model: defaultModel,
         thinking: "minimal",
         tools: ["read", "bash", "grep", "find", "ls", "edit"],
         systemPrompt: `${base}\nRun tests, diagnose failures, suggest or apply fixes.`,
@@ -72,7 +66,6 @@ function defaultConfig(): SwarmConfig {
       {
         name: "reviewer",
         description: "Read-only reviewer for diffs, risks, and missed edge cases.",
-        model: defaultModel,
         thinking: "minimal",
         tools: ["read", "bash", "grep", "find", "ls"],
         systemPrompt: `${base}\nReview diffs for bugs, regressions, missing tests. Read-only.`,
@@ -102,6 +95,26 @@ function getPiInvocation(args: string[]) {
   const runtime = process.execPath.split(/[\\/]/).pop()?.toLowerCase() ?? "";
   if (/^(node|bun)(\.exe)?$/.test(runtime)) return { command: "pi", args };
   return { command: process.execPath, args };
+}
+
+function loadConfiguredSwarmModel(cwd: string): string {
+  const paths = [
+    process.env.PI_CODING_AGENT_DIR
+      ? join(process.env.PI_CODING_AGENT_DIR, "settings.json")
+      : join(homedir(), ".pi", "agent", "settings.json"),
+    join(cwd, ".pi", "settings.json"),
+  ];
+
+  let configured: unknown;
+  for (const path of paths) {
+    try {
+      const settings = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
+      if (typeof settings.swarmModel === "string") configured = settings.swarmModel;
+    } catch {
+      // Missing or malformed settings do not prevent swarm execution.
+    }
+  }
+  return typeof configured === "string" ? configured.trim() : "";
 }
 
 /**
@@ -143,6 +156,7 @@ async function runAgent(
   agentName: string,
   task: string,
   cwd: string,
+  swarmModel: string,
   availableModels: Array<{ provider: string; id: string }>,
   signal?: AbortSignal,
   fallbackModel?: string,
@@ -153,8 +167,7 @@ async function runAgent(
     throw new Error(`Unknown agent "${agentName}". Available: ${available}`);
   }
 
-  const configuredModel = agent.model ?? config.defaultModel;
-  const model = resolveSwarmModel(configuredModel, availableModels, fallbackModel);
+  const model = resolveSwarmModel(swarmModel, availableModels, fallbackModel);
   const thinking = agent.thinking ?? config.defaultThinking ?? "low";
   const timeoutMs = config.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const prompt = `${agent.systemPrompt}\n\nAssigned task:\n${task}`;
@@ -376,11 +389,12 @@ export default function swarmExtension(pi: ExtensionAPI) {
       }
 
       const availableModels = ctx.modelRegistry.getAvailable().map(({ provider, id }) => ({ provider, id }));
+      const swarmModel = loadConfiguredSwarmModel(ctx.cwd);
       const fallbackModel = ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : undefined;
 
       if (single) {
         onUpdate?.({ content: [{ type: "text", text: `Running ${params.agent}...` }] });
-        const result = await runAgent(config, params.agent!, params.task!, ctx.cwd, availableModels, signal, fallbackModel);
+        const result = await runAgent(config, params.agent!, params.task!, ctx.cwd, swarmModel, availableModels, signal, fallbackModel);
         return {
           content: [{ type: "text", text: formatResults([result]) }],
           details: { results: [result] },
@@ -389,7 +403,7 @@ export default function swarmExtension(pi: ExtensionAPI) {
 
       onUpdate?.({ content: [{ type: "text", text: `Running ${batch!.length} agents...` }] });
       const results = await runParallel(batch!, MAX_PARALLEL, (item) =>
-        runAgent(config, item.agent, item.task, ctx.cwd, availableModels, signal, fallbackModel),
+        runAgent(config, item.agent, item.task, ctx.cwd, swarmModel, availableModels, signal, fallbackModel),
       );
       return {
         content: [{ type: "text", text: formatResults(results) }],
