@@ -36,7 +36,7 @@ type RunResult = {
 };
 
 function defaultConfig(): SwarmConfig {
-  const defaultModel = "azure_ai/deepseek-v4-flash";
+  const defaultModel = "openai-codex/gpt-5.6-luna";
 
   const base = "Do only the assigned task. Return findings and blockers. Stay concise and straightforward.";
 
