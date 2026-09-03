@@ -104,12 +104,48 @@ function getPiInvocation(args: string[]) {
   return { command: process.execPath, args };
 }
 
+/**
+ * Resolve the model to run this agent with.
+ *
+ * Priority:
+ *   1. Agent/default configured model — if it resolves to an available model
+ *      in the registry, use it.
+ *   2. The session's currently active model (`fallbackModel`), so we never
+ *      hard-fail when a specific swarm model is unavailable/misconfigured.
+ *   3. Omit `--model` entirely and let the spawned pi use its own default.
+ *
+ * `configured` may be an exact `provider/id` or a pattern; we only treat a
+ * model as "resolvable" when `available` has an exact match, so a present-but
+ * -broken configured pattern falls through to the active session model.
+ */
+function resolveSwarmModel(
+  configured: string,
+  available: Array<{ provider: string; id: string }>,
+  fallbackModel?: string,
+): string {
+  if (configured && configured.trim()) {
+    const candidate = configured.trim();
+    const slash = candidate.indexOf("/");
+    if (slash > 0) {
+      const provider = candidate.slice(0, slash);
+      const id = candidate.slice(slash + 1);
+      if (available.some((m) => m.provider === provider && m.id === id)) return candidate;
+    }
+  }
+  if (fallbackModel && fallbackModel.trim() && fallbackModel.includes("/")) {
+    return fallbackModel.trim();
+  }
+  return "";
+}
+
 async function runAgent(
   config: SwarmConfig,
   agentName: string,
   task: string,
   cwd: string,
+  availableModels: Array<{ provider: string; id: string }>,
   signal?: AbortSignal,
+  fallbackModel?: string,
 ) {
   const agent = config.agents.find((item) => item.name === agentName);
   if (!agent) {
@@ -117,7 +153,8 @@ async function runAgent(
     throw new Error(`Unknown agent "${agentName}". Available: ${available}`);
   }
 
-  const model = agent.model ?? config.defaultModel;
+  const configuredModel = agent.model ?? config.defaultModel;
+  const model = resolveSwarmModel(configuredModel, availableModels, fallbackModel);
   const thinking = agent.thinking ?? config.defaultThinking ?? "low";
   const timeoutMs = config.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const prompt = `${agent.systemPrompt}\n\nAssigned task:\n${task}`;
@@ -338,9 +375,12 @@ export default function swarmExtension(pi: ExtensionAPI) {
         return { content: [{ type: "text", text: `Too many tasks: max ${MAX_PARALLEL}.` }] };
       }
 
+      const availableModels = ctx.modelRegistry.getAvailable().map(({ provider, id }) => ({ provider, id }));
+      const fallbackModel = ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : undefined;
+
       if (single) {
         onUpdate?.({ content: [{ type: "text", text: `Running ${params.agent}...` }] });
-        const result = await runAgent(config, params.agent!, params.task!, ctx.cwd, signal);
+        const result = await runAgent(config, params.agent!, params.task!, ctx.cwd, availableModels, signal, fallbackModel);
         return {
           content: [{ type: "text", text: formatResults([result]) }],
           details: { results: [result] },
@@ -349,7 +389,7 @@ export default function swarmExtension(pi: ExtensionAPI) {
 
       onUpdate?.({ content: [{ type: "text", text: `Running ${batch!.length} agents...` }] });
       const results = await runParallel(batch!, MAX_PARALLEL, (item) =>
-        runAgent(config, item.agent, item.task, ctx.cwd, signal),
+        runAgent(config, item.agent, item.task, ctx.cwd, availableModels, signal, fallbackModel),
       );
       return {
         content: [{ type: "text", text: formatResults(results) }],
