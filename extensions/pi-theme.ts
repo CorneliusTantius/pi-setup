@@ -14,7 +14,7 @@ const ANSI_RE = /\x1b\[[0-9;]*m/g;
 const ANSI_CODE_RE = /\x1b\[([0-9;]*)m/g;
 const OSC_RE = /\x1b\][^\x07]*(?:\x07|\x1b\\)/g;
 const MAX = 90;
-const CHAT_CHILD_LIMIT = 99;
+const CHAT_CHILD_LIMIT = 100;
 const PAD = " ";
 const TOOL_BG_KEYS = ["toolPendingBg", "toolSuccessBg", "toolErrorBg"] as const;
 let showFullChat = false;
@@ -344,8 +344,9 @@ function patchChatLimit(): void {
 
   const originalInit = proto.init;
   proto.init = async function initWithCappedChat(this: any, ...args: any[]) {
+    const result = await originalInit.apply(this, args);
     capChatContainer(this.chatContainer);
-    return originalInit.apply(this, args);
+    return result;
   };
 
   proto[CHAT_PATCHED] = true;
