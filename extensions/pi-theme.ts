@@ -349,6 +349,17 @@ function patchChatLimit(): void {
     return result;
   };
 
+  // Fork/resume redraws the transcript through this method without necessarily
+  // running init again. Reapply to support a replaced chat container.
+  const originalRenderInitialMessages = proto.renderInitialMessages;
+  if (typeof originalRenderInitialMessages === "function") {
+    proto.renderInitialMessages = function renderInitialMessagesWithCap(this: any, ...args: any[]) {
+      const result = originalRenderInitialMessages.apply(this, args);
+      capChatContainer(this.chatContainer);
+      return result;
+    };
+  }
+
   proto[CHAT_PATCHED] = true;
 }
 
