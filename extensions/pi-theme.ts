@@ -386,18 +386,10 @@ function registerChatToggle(pi: ExtensionAPI): void {
 // ── Header ──────────────────────────────────────────────────────────────
 
 
-// ── Working indicator ──────────────────────────────────────────────────
+// Pi's built-in working indicator is intentionally used here; avoid overriding
+// it because its implementation may change between Pi releases.
 
-function installWorkingIndicator(pi: ExtensionAPI): void {
-  pi.on("session_start", (_event, ctx) => {
-    if (!ctx.hasUI) return;
-    try {
-      ctx.ui.setWorkingIndicator({
-        frames: [
-          ctx.ui.theme.fg("dim", "·"),
-          ctx.ui.theme.fg("muted", "•"),
-          ctx.ui.theme.fg("accent", "●"),
-          ctx.ui.theme.fg("muted", "•"),
+e.fg("muted", "•"),
         ],
         intervalMs: 120,
       });
@@ -690,5 +682,4 @@ export default function piTheme(pi: ExtensionAPI): void {
   [patchChatLimit, patchTools, patchAssistant, patchInput, patchUserMessages, patchRtkStatus, patchFooter].forEach(safePatch);
   safePatch(() => registerChatToggle(pi));
   safePatch(() => installTiming(pi));
-  safePatch(() => installWorkingIndicator(pi));
 }
