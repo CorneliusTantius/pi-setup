@@ -560,7 +560,7 @@ function framedLine(line: string, width: number, color = "", borderColor = "bord
   const left = fg(theme, borderColor, "│");
   const right = fg(theme, borderColor, "│");
   const text = color ? fg(theme, color, line) : line;
-  return left + fit(text, Math.max(0, width - 2)) + right;ght;
+  return left + fit(text, Math.max(0, width - 2)) + right;
 }
 
 function inputTop(width: number): string {
