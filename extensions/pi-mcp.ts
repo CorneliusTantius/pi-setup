@@ -14,6 +14,7 @@ type ServerConfig = {
   cwd?: string;
   url?: string;
   headers?: Record<string, string>;
+  token?: string;
   tokenEnv?: string;
 };
 
@@ -82,7 +83,8 @@ async function connectServer(pi: ExtensionAPI, serverName: string, config: Serve
     transport = new StdioClientTransport({ command: config.command, args: config.args, env, cwd: config.cwd || cwd, stderr: "pipe" });
   } else {
     const headers = { ...config.headers };
-    if (config.tokenEnv && process.env[config.tokenEnv]) headers.Authorization = `Bearer ${process.env[config.tokenEnv]}`;
+    const token = config.token || (config.tokenEnv ? process.env[config.tokenEnv] : undefined);
+    if (token) headers.Authorization = `Bearer ${token}`;
     transport = new StreamableHTTPClientTransport(new URL(config.url!), { requestInit: { headers } });
   }
   await client.connect(transport);
