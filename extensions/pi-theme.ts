@@ -389,13 +389,7 @@ function registerChatToggle(pi: ExtensionAPI): void {
 // Pi's built-in working indicator is intentionally used here; avoid overriding
 // it because its implementation may change between Pi releases.
 
-e.fg("muted", "•"),
-        ],
-        intervalMs: 120,
-      });
-    } catch { /* best-effort */ }
-  });
-}
+
 
 // ── Turn timing state ───────────────────────────────────────────────────
 
