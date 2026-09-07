@@ -586,6 +586,10 @@ function patchInput(): void {
   const originalRender = proto.render;
   proto.render = function renderPrettyInput(this: any, width: number): string[] {
     try {
+      // Pi now embeds the default working spinner in the editor's top border.
+      // Preserve that renderer while it is active instead of replacing the
+      // spinner with the theme's static prompt frame.
+      if (this.workingStatusIndicator) return originalRender.call(this, width);
       if (width < 8) return fallbackRender(originalRender, this, width);
       const lines = originalRender.call(this, Math.max(1, width - 2));
       let bottom = -1;

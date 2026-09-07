@@ -22,6 +22,14 @@ const HINT = "provider returned error";
 let stallTimer: ReturnType<typeof setTimeout> | undefined;
 
 export default function piRetry(pi: ExtensionAPI) {
+  pi.on("agent_start", (_event, ctx) => {
+    ctx.ui.setStatus("pi-retry", undefined);
+  });
+
+  pi.on("agent_settled", (_event, ctx) => {
+    ctx.ui.setStatus("pi-retry", undefined);
+  });
+
   pi.on("before_provider_request", () => {
     clearTimeout(stallTimer);
     stallTimer = setTimeout(() => pi.abort?.(), STALL_MS);
@@ -46,7 +54,7 @@ export default function piRetry(pi: ExtensionAPI) {
     clearTimeout(stallTimer);
   });
 
-  pi.on("message_end", (event) => {
+  pi.on("message_end", (event, ctx) => {
     clearTimeout(stallTimer);
 
     const msg = event.message as any;
@@ -63,6 +71,7 @@ export default function piRetry(pi: ExtensionAPI) {
 
     if (!tag || err.includes(tag)) return;
 
+    ctx.ui.setStatus("pi-retry", `${tag} retrying…`);
     return {
       message: {
         ...msg,
