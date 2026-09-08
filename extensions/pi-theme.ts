@@ -15,7 +15,7 @@ const ANSI_CODE_RE = /\x1b\[([0-9;]*)m/g;
 const OSC_RE = /\x1b\][^\x07]*(?:\x07|\x1b\\)/g;
 const MAX = 90;
 const CHAT_CHILD_LIMIT = 100;
-const PAD = " ";
+
 const TOOL_BG_KEYS = ["toolPendingBg", "toolSuccessBg", "toolErrorBg"] as const;
 let showFullChat = false;
 const OSC133_ZONE_START = "\x1b]133;A\x07";
@@ -166,7 +166,7 @@ function isThinkingLine(line: string): boolean {
 
 function padThinkingLine(line: string): string {
   const cleaned = stripBgAnsi(trimLeft(line));
-  return isThinkingLine(cleaned) ? `${PAD}${rail()} ${cleaned}` : line;
+  return isThinkingLine(cleaned) ? cleaned : line;
 }
 
 function cleanAssistantLine(line: string): string {
@@ -244,7 +244,7 @@ function patchAssistant(): void {
   proto.render = function renderAssistantBubble(this: any, width: number): string[] {
     try {
       const bubbleWidth = Math.max(1, width);
-      const renderWidth = hasThinkingContent(this) ? Math.max(1, bubbleWidth - PAD.length) : bubbleWidth;
+      const renderWidth = bubbleWidth;
       const rendered = originalRender.call(this, renderWidth);
 
       if (this.hasToolCalls) {
@@ -531,7 +531,7 @@ function patchRtkStatus(): void {
     try {
       if (!this.lastStatusText) return;
       const isRtk = String(message).startsWith("RTK rewrite:");
-      this.lastStatusText.paddingX = isRtk ? PAD.length : 1;
+      this.lastStatusText.paddingX = isRtk ? 0 : 1;
       if (isRtk) this.lastStatusText.setText?.(`${rail()} ${fg(getTheme(), "dim", stripAnsi(message))}`);
       this.lastStatusText.invalidate?.();
     } catch {
