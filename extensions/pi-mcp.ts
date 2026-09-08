@@ -28,6 +28,7 @@ type Settings = { mcpServers?: Record<string, ServerConfig> };
 type ConnectedServer = { client: Client; transport: StdioClientTransport | StreamableHTTPClientTransport; tools: string[] };
 
 const TOOL_PREFIX = "mcp_";
+const OAUTH_CALLBACK_PORT = 43123;
 const clients = new Map<string, ConnectedServer>();
 const registeredTools = new Set<string>();
 let enabled = false;
@@ -140,7 +141,7 @@ async function oauthProvider(serverName: string, config: ServerConfig): Promise<
     callbackResolve(code);
     response.end("Pi MCP authorization complete. You can close this window.");
   });
-  await new Promise<void>((resolve, reject) => callback.listen(0, "127.0.0.1", () => resolve()).on("error", reject));
+  await new Promise<void>((resolve, reject) => callback.listen(OAUTH_CALLBACK_PORT, "127.0.0.1", () => resolve()).on("error", reject));
   const address = callback.address();
   if (!address || typeof address === "string") throw new Error("Could not start OAuth callback server");
   const redirectUrl = `http://127.0.0.1:${address.port}/callback`;
