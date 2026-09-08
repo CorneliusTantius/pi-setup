@@ -564,6 +564,10 @@ function framedLine(line: string, width: number, color = "", borderColor = "bord
   return left + fit(text, Math.max(0, width - 2)) + right;
 }
 
+function inputRule(width: number): string {
+  return fg(getTheme(), "borderMuted", "─".repeat(Math.max(0, width)));
+}
+
 function isEditorRule(line: string): boolean {
   return stripAnsi(line).trim().startsWith("─");
 }
@@ -585,9 +589,9 @@ function patchInput(): void {
       if (end > start && isEditorRule(lines[end - 1])) end--;
       const content = lines.slice(start, end);
       return [
-        framedTop("prompt", width, { labelColor: "muted", borderColor: "borderMuted" }),
+        inputRule(width),
         ...(content.length ? content : [""]).map((line: string) => truncateToWidth(trimLeft(line), width, "")),
-        framedBottom(width, "borderMuted"),
+        inputRule(width),
       ];
     } catch {
       return fallbackRender(originalRender, this, width);
