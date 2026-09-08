@@ -551,7 +551,6 @@ function plainRule(width: number, color = "borderMuted"): string {
 function inputRule(width: number): string {
   return plainRule(width);
 }
-}
 
 function isEditorRule(line: string): boolean {
   return stripAnsi(line).trim().startsWith("─");
