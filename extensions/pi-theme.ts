@@ -177,9 +177,9 @@ function cleanAssistantLine(line: string): string {
 function assistantBubble(lines: string[], width: number): string[] {
   const theme = getTheme();
   return [
-    framedTop("pi", width, { labelColor: "customMessageText", borderColor: "borderMuted" }),
+    plainRule(width),
     ...lines.map((line) => fg(theme, "customMessageText", fit(line, width))),
-    framedBottom(width, "borderMuted"),
+    plainRule(width),
   ];
 }
 
@@ -542,30 +542,16 @@ function patchRtkStatus(): void {
   proto[STATUS_PATCHED] = true;
 }
 
-function framedTop(label: string, width: number, { align = "left", labelColor = "accent", borderColor = "borderMuted" }: { align?: string; labelColor?: string; borderColor?: string } = {}): string {
-  const theme = getTheme();
-  const border = (text: string) => fg(theme, borderColor, text);
-  const title = fg(theme, labelColor, ` ${label} `);
-  const fill = border("─".repeat(Math.max(0, width - visibleWidth(` ${label} `) - 3)));
-  return align === "right"
-    ? `${border("╭")}${fill}${title}${border("─╮")}`
-    : `${border("╭─")}${title}${fill}${border("╮")}`;
+width - 2)) + right;
 }
 
-function framedBottom(width: number, borderColor = "borderMuted"): string {
-  return fg(getTheme(), borderColor, `╰${"─".repeat(Math.max(0, width - 2))}╯`);
-}
-
-function framedLine(line: string, width: number, color = "", borderColor = "borderMuted"): string {
-  const theme = getTheme();
-  const left = fg(theme, borderColor, "│");
-  const right = fg(theme, borderColor, "│");
-  const text = color ? fg(theme, color, line) : line;
-  return left + fit(text, Math.max(0, width - 2)) + right;
+function plainRule(width: number, color = "borderMuted"): string {
+  return fg(getTheme(), color, "─".repeat(Math.max(0, width)));
 }
 
 function inputRule(width: number): string {
-  return fg(getTheme(), "borderMuted", "─".repeat(Math.max(0, width)));
+  return plainRule(width);
+}
 }
 
 function isEditorRule(line: string): boolean {
@@ -608,9 +594,9 @@ function userLines(text: string, width: number): string[] {
     .split("\n")
     .flatMap((line: string) => wrapTextWithAnsi(line || " ", contentWidth));
   return [
-    OSC133_ZONE_START + framedTop("you", width, { align: "right", labelColor: "userMessageText", borderColor: "border" }),
-    ...(lines.length ? lines : [""]).map((line: string) => framedLine(line, width, "userMessageText", "border")),
-    OSC133_ZONE_END + OSC133_ZONE_FINAL + framedBottom(width, "border"),
+    OSC133_ZONE_START + plainRule(width, "border"),
+    ...(lines.length ? lines : [""]).map((line: string) => fg(getTheme(), "userMessageText", fit(line, width))),
+    OSC133_ZONE_END + OSC133_ZONE_FINAL + plainRule(width, "border"),
   ];
 }
 
