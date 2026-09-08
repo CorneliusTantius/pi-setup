@@ -167,7 +167,7 @@ async function oauthProvider(serverName: string, config: ServerConfig): Promise<
 }
 
 async function authenticateServer(serverName: string, config: ServerConfig): Promise<any | undefined> {
-  if (config.oauth === false || config.token || config.tokenEnv) return undefined;
+  if (config.oauth === false || config.token || config.tokenEnv || Object.keys(config.headers || {}).length > 0) return undefined;
   if (!config.url) return undefined;
   const { provider, waitForCode, close } = await oauthProvider(serverName, config);
   try {
