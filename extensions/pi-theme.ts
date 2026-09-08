@@ -542,8 +542,7 @@ function patchRtkStatus(): void {
   proto[STATUS_PATCHED] = true;
 }
 
-width - 2)) + right;
-}
+
 
 function plainRule(width: number, color = "borderMuted"): string {
   return fg(getTheme(), color, "─".repeat(Math.max(0, width)));
