@@ -508,7 +508,7 @@ function installTiming(pi: ExtensionAPI): void {
       }
 
       try {
-        ctx.ui.notify(parts.join(` ${theme.fg("dim", "|")} `), "info");
+        ctx.ui.notify(theme.fg("dim", parts.join(` ${theme.fg("dim", "|")} `)), "info");
       } catch { /* */ }
 
       turnStart = 0;
