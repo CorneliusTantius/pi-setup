@@ -583,7 +583,8 @@ function patchInput(): void {
       let end = lines.length;
       if (lines.length > 0 && isEditorRule(lines[0])) start++;
       if (end > start && isEditorRule(lines[end - 1])) end--;
-      return lines.slice(start, end).map((line: string) => truncateToWidth(trimLeft(line), width, ""));
+      const content = lines.slice(start, end);
+      return (content.length ? content : [""]).map((line: string) => truncateToWidth(trimLeft(line), width, ""));
     } catch {
       return fallbackRender(originalRender, this, width);
     }
