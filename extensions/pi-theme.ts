@@ -136,7 +136,7 @@ function toolLine(theme: PiTheme, name: string, value: string, context?: { isErr
   const color = status === "error" ? "error" : status === "running" ? "warning" : "success";
   const icon = status === "error" ? "✗" : status === "running" ? "›" : "✓";
   const tool = status === "error" ? fg(theme, "error", name) : fg(theme, "dim", name);
-  return new Text(`${rail()} ${fg(theme, color, icon)} ${tool}${value ? ` ${fg(theme, "dim", value)}` : ""}`, 0, 0);
+  return new Text(`${fg(theme, color, icon)} ${tool}${value ? ` ${fg(theme, "dim", value)}` : ""}`, 0, 0);
 }
 
 function trimBlank(lines: string[]): string[] {
@@ -217,9 +217,9 @@ function patchTools(): void {
   if (typeof originalRender === "function") {
     proto.render = function renderCompactTool(this: any, width: number): string[] {
       try {
-        const innerWidth = Math.max(1, width - PAD.length);
+        const innerWidth = Math.max(1, width);
         return trimBlank(originalRender.call(this, innerWidth))
-          .map((line: string) => PAD + truncateToWidth(trimLeft(line), innerWidth, ""));
+          .map((line: string) => truncateToWidth(trimLeft(line), innerWidth, ""));
       } catch {
         return fallbackRender(originalRender, this, width);
       }
