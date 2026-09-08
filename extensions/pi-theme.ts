@@ -564,18 +564,6 @@ function framedLine(line: string, width: number, color = "", borderColor = "bord
   return left + fit(text, Math.max(0, width - 2)) + right;
 }
 
-function inputTop(width: number): string {
-  return framedTop("prompt", width, { labelColor: "muted", borderColor: "borderMuted" });
-}
-
-function inputBottom(width: number): string {
-  return framedBottom(width, "borderMuted");
-}
-
-function inputLine(line: string, width: number): string {
-  return framedLine(line, width, "", "borderMuted");
-}
-
 function isEditorRule(line: string): boolean {
   return stripAnsi(line).trim().startsWith("─");
 }
@@ -585,33 +573,24 @@ function patchInput(): void {
   if (!proto || proto[INPUT_PATCHED] || typeof proto.render !== "function") return;
 
   const originalRender = proto.render;
-  proto.render = function renderPrettyInput(this: any, width: number): string[] {
+  proto.render = function renderBorderlessInput(this: any, width: number): string[] {
     try {
-      // Pi now embeds the default working spinner in the editor's top border.
-      // Preserve that renderer while it is active instead of replacing the
-      // spinner with the theme's static prompt frame.
-      if (this.workingStatusIndicator) return originalRender.call(this, width);
-      if (width < 8) return fallbackRender(originalRender, this, width);
-      const lines = originalRender.call(this, Math.max(1, width - 2));
-      let bottom = -1;
-      for (let i = lines.length - 1; i > 0; i--) {
-        if (isEditorRule(lines[i])) {
-          bottom = i;
-          break;
-        }
-      }
-      if (bottom < 1 || !isEditorRule(lines[0])) return fallbackRender(originalRender, this, width);
-      return lines.map((line: string, index: number) => {
-        if (index === 0) return inputTop(width);
-        if (index === bottom) return inputBottom(width);
-        return inputLine(line, width);
-      });
+      const lines = originalRender.call(this, width);
+      // Keep Pi's native top border while it embeds the working spinner.
+      if (this.workingStatusIndicator) return lines;
+
+      let start = 0;
+      let end = lines.length;
+      if (lines.length > 0 && isEditorRule(lines[0])) start++;
+      if (end > start && isEditorRule(lines[end - 1])) end--;
+      return lines.slice(start, end).map((line: string) => truncateToWidth(trimLeft(line), width, ""));
     } catch {
       return fallbackRender(originalRender, this, width);
     }
   };
 
   proto[INPUT_PATCHED] = true;
+}
 }
 
 function userLines(text: string, width: number): string[] {
