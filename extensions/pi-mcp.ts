@@ -144,7 +144,7 @@ async function oauthProvider(serverName: string, config: ServerConfig): Promise<
   await new Promise<void>((resolve, reject) => callback.listen(OAUTH_CALLBACK_PORT, "127.0.0.1", () => resolve()).on("error", reject));
   const address = callback.address();
   if (!address || typeof address === "string") throw new Error("Could not start OAuth callback server");
-  const redirectUrl = `http://127.0.0.1:${address.port}/callback`;
+  const redirectUrl = `http://localhost:${OAUTH_CALLBACK_PORT}/callback`;
   const provider: any = {
     get redirectUrl() { return redirectUrl; },
     clientMetadataUrl: config.clientMetadataUrl,
