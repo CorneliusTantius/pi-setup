@@ -175,6 +175,7 @@ async function authenticateServer(serverName: string, config: ServerConfig): Pro
       const code = await waitForCode();
       await auth(provider, { serverUrl: config.url, authorizationCode: code });
     }
+    close();
     return provider;
   } catch (error) {
     close();
