@@ -584,7 +584,11 @@ function patchInput(): void {
       if (lines.length > 0 && isEditorRule(lines[0])) start++;
       if (end > start && isEditorRule(lines[end - 1])) end--;
       const content = lines.slice(start, end);
-      return (content.length ? content : [""]).map((line: string) => truncateToWidth(trimLeft(line), width, ""));
+      return [
+        framedTop("prompt", width, { labelColor: "muted", borderColor: "borderMuted" }),
+        ...(content.length ? content : [""]).map((line: string) => truncateToWidth(trimLeft(line), width, "")),
+        framedBottom(width, "borderMuted"),
+      ];
     } catch {
       return fallbackRender(originalRender, this, width);
     }
