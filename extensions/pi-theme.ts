@@ -175,9 +175,10 @@ function cleanAssistantLine(line: string): string {
 }
 
 function assistantBubble(lines: string[], width: number): string[] {
+  const theme = getTheme();
   return [
     framedTop("pi", width, { labelColor: "customMessageText", borderColor: "borderMuted" }),
-    ...lines.map((line) => framedLine(line, width, "customMessageText", "borderMuted")),
+    ...lines.map((line) => fg(theme, "customMessageText", fit(line, width))),
     framedBottom(width, "borderMuted"),
   ];
 }
@@ -242,7 +243,7 @@ function patchAssistant(): void {
 
   proto.render = function renderAssistantBubble(this: any, width: number): string[] {
     try {
-      const bubbleWidth = Math.max(1, width - 2);
+      const bubbleWidth = Math.max(1, width);
       const renderWidth = hasThinkingContent(this) ? Math.max(1, bubbleWidth - PAD.length) : bubbleWidth;
       const rendered = originalRender.call(this, renderWidth);
 
