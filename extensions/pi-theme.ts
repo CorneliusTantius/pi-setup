@@ -590,7 +590,7 @@ function patchInput(): void {
   };
 
   proto[INPUT_PATCHED] = true;
-}
+
 }
 
 function userLines(text: string, width: number): string[] {
