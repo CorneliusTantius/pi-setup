@@ -26,7 +26,7 @@ const OSC133_ZONE_FINAL = "\x1b]133;C\x07";
 function getTheme(): PiTheme {
   return (globalThis as any)[PI_THEME];
 }
-const _t = () => getTheme();
+
 
 interface PiTheme {
   fg?: (key: string, text: string) => string;
@@ -230,9 +230,7 @@ function patchTools(): void {
   proto[TOOL_PATCHED] = true;
 }
 
-function hasThinkingContent(component: any): boolean {
-  return component?.lastMessage?.content?.some((item: any) => item?.type === "thinking" && item?.thinking?.trim());
-}
+
 
 function patchAssistant(): void {
   const proto = AssistantMessageComponent?.prototype as any;
@@ -548,10 +546,6 @@ function plainRule(width: number, color = "borderMuted"): string {
   return fg(getTheme(), color, "─".repeat(Math.max(0, width)));
 }
 
-function inputRule(width: number): string {
-  return plainRule(width);
-}
-
 function isEditorRule(line: string): boolean {
   return stripAnsi(line).trim().startsWith("─");
 }
@@ -573,9 +567,9 @@ function patchInput(): void {
       if (end > start && isEditorRule(lines[end - 1])) end--;
       const content = lines.slice(start, end);
       return [
-        inputRule(width),
+        plainRule(width),
         ...(content.length ? content : [""]).map((line: string) => truncateToWidth(trimLeft(line), width, "")),
-        inputRule(width),
+        plainRule(width),
       ];
     } catch {
       return fallbackRender(originalRender, this, width);
