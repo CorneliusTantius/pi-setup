@@ -97,7 +97,7 @@ function getPiInvocation(args: string[]) {
   return { command: process.execPath, args };
 }
 
-function loadConfiguredSwarmModel(cwd: string): string {
+function loadConfiguredSwarmSettings(cwd: string): { model: string; thinking?: ThinkingLevel } {
   const paths = [
     process.env.PI_CODING_AGENT_DIR
       ? join(process.env.PI_CODING_AGENT_DIR, "settings.json")
@@ -105,16 +105,20 @@ function loadConfiguredSwarmModel(cwd: string): string {
     join(cwd, ".pi", "settings.json"),
   ];
 
-  let configured: unknown;
+  let model = "";
+  let thinking: ThinkingLevel | undefined;
   for (const path of paths) {
     try {
       const settings = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
-      if (typeof settings.swarmModel === "string") configured = settings.swarmModel;
+      if (typeof settings.swarmModel === "string") model = settings.swarmModel.trim();
+      if (typeof settings.swarmThinking === "string" && THINKING_LEVELS.includes(settings.swarmThinking as ThinkingLevel)) {
+        thinking = settings.swarmThinking as ThinkingLevel;
+      }
     } catch {
       // Missing or malformed settings do not prevent swarm execution.
     }
   }
-  return typeof configured === "string" ? configured.trim() : "";
+  return { model, thinking };
 }
 
 /**
@@ -157,6 +161,7 @@ async function runAgent(
   task: string,
   cwd: string,
   swarmModel: string,
+  swarmThinking: ThinkingLevel | undefined,
   availableModels: Array<{ provider: string; id: string }>,
   signal?: AbortSignal,
   fallbackModel?: string,
@@ -168,7 +173,7 @@ async function runAgent(
   }
 
   const model = resolveSwarmModel(swarmModel, availableModels, fallbackModel);
-  const thinking = agent.thinking ?? config.defaultThinking ?? "low";
+  const thinking = swarmThinking ?? agent.thinking ?? config.defaultThinking ?? "low";
   const timeoutMs = config.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const prompt = `${agent.systemPrompt}\n\nAssigned task:\n${task}`;
   const args = [
@@ -389,12 +394,13 @@ export default function swarmExtension(pi: ExtensionAPI) {
       }
 
       const availableModels = ctx.modelRegistry.getAvailable().map(({ provider, id }) => ({ provider, id }));
-      const swarmModel = loadConfiguredSwarmModel(ctx.cwd);
+      const swarmSettings = loadConfiguredSwarmSettings(ctx.cwd);
+      const swarmModel = swarmSettings.model;
       const fallbackModel = ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : undefined;
 
       if (single) {
         onUpdate?.({ content: [{ type: "text", text: `Running ${params.agent}...` }] });
-        const result = await runAgent(config, params.agent!, params.task!, ctx.cwd, swarmModel, availableModels, signal, fallbackModel);
+        const result = await runAgent(config, params.agent!, params.task!, ctx.cwd, swarmModel, swarmSettings.thinking, availableModels, signal, fallbackModel);
         return {
           content: [{ type: "text", text: formatResults([result]) }],
           details: { results: [result] },
@@ -403,7 +409,7 @@ export default function swarmExtension(pi: ExtensionAPI) {
 
       onUpdate?.({ content: [{ type: "text", text: `Running ${batch!.length} agents...` }] });
       const results = await runParallel(batch!, MAX_PARALLEL, (item) =>
-        runAgent(config, item.agent, item.task, ctx.cwd, swarmModel, availableModels, signal, fallbackModel),
+        runAgent(config, item.agent, item.task, ctx.cwd, swarmModel, swarmSettings.thinking, availableModels, signal, fallbackModel),
       );
       return {
         content: [{ type: "text", text: formatResults(results) }],
