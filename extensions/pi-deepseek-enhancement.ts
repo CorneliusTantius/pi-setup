@@ -21,6 +21,7 @@
  * Auto-activates when model name contains "deepseek" (case-insensitive).
  */
 
+import { withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 import type {
   BuildSystemPromptOptions,
   ExtensionAPI,
@@ -309,63 +310,60 @@ const editLinesTool: ToolDefinition = {
       };
     }
 
-    const absPath = resolve(ctx.cwd, rawPath);
-    let content: string;
-    try {
-      content = await readFile(absPath, "utf-8");
-    } catch (err) {
-      return { content: [{ type: "text", text: `Error reading file: ${err}` }], isError: true };
+    if (edits.some((e) => !e || !Number.isInteger(e.from) || !Number.isInteger(e.to) ||
+      !/^[0-9a-f]{3}$/i.test(e.from_hash) || !/^[0-9a-f]{3}$/i.test(e.to_hash) || typeof e.new_text !== "string")) {
+      return { content: [{ type: "text", text: "edit_lines: each edit must have valid line numbers, 3-digit hex hashes, and string new_text." }], isError: true };
+    }
+    const ordered = [...edits].sort((a, b) => a.from - b.from);
+    if (ordered.some((e, i) => i > 0 && e.from <= ordered[i - 1]!.to)) {
+      return { content: [{ type: "text", text: "edit_lines: edits must not overlap." }], isError: true };
     }
 
-    const lines = content.split("\n");
+    const absPath = resolve(ctx.cwd, rawPath);
+    return withFileMutationQueue(absPath, async () => {
+      let content: string;
+      try {
+        content = await readFile(absPath, "utf-8");
+      } catch (err) {
+        return { content: [{ type: "text", text: `Error reading file: ${err}` }], isError: true };
+      }
 
-    for (const e of edits) {
-      const fromIdx = e.from - 1;
-      const toIdx = e.to - 1;
-      if (fromIdx < 0 || fromIdx >= lines.length) {
-        return { content: [{ type: "text", text: `edit_lines: line ${e.from} out of range (file has ${lines.length} lines).` }], isError: true };
-      }
-      if (toIdx < 0 || toIdx >= lines.length || toIdx < fromIdx) {
-        return { content: [{ type: "text", text: `edit_lines: line ${e.to} out of range (file has ${lines.length} lines).` }], isError: true };
-      }
-      const actualFromHash = lineHash(lines[fromIdx]!);
-      if (actualFromHash !== e.from_hash) {
-        return {
-          content: [{ type: "text", text: `edit_lines: line ${e.from} hash mismatch — claimed "${e.from_hash}", actual "${actualFromHash}".\nLine: "${lines[fromIdx]}"\nRe-read the file for fresh hashes.` }],
-          isError: true,
-        };
-      }
-      if (e.to !== e.from) {
+      const lines = content.split("\n");
+      for (const e of edits) {
+        const fromIdx = e.from - 1;
+        const toIdx = e.to - 1;
+        if (fromIdx < 0 || fromIdx >= lines.length || toIdx < fromIdx || toIdx >= lines.length) {
+          return { content: [{ type: "text", text: `edit_lines: range ${e.from}-${e.to} out of range (file has ${lines.length} lines).` }], isError: true };
+        }
+        const actualFromHash = lineHash(lines[fromIdx]!);
         const actualToHash = lineHash(lines[toIdx]!);
-        if (actualToHash !== e.to_hash) {
+        if (actualFromHash !== e.from_hash || actualToHash !== e.to_hash) {
           return {
-            content: [{ type: "text", text: `edit_lines: line ${e.to} hash mismatch — claimed "${e.to_hash}", actual "${actualToHash}".\nLine: "${lines[toIdx]}"\nRe-read the file for fresh hashes.` }],
+            content: [{ type: "text", text: `edit_lines: hash mismatch in range ${e.from}-${e.to} (actual ${actualFromHash}..${actualToHash}). Re-read the file for fresh hashes.` }],
             isError: true,
           };
         }
       }
-    }
 
-    const result = [...lines];
-    [...edits]
-      .sort((a, b) => b.to - a.to)
-      .forEach((e) => {
+      const result = [...lines];
+      [...edits].sort((a, b) => b.from - a.from).forEach((e) => {
         result.splice(e.from - 1, e.to - e.from + 1, ...e.new_text.split("\n"));
       });
 
-    try {
-      await writeFile(absPath, result.join("\n"), "utf-8");
-    } catch (err) {
-      return { content: [{ type: "text", text: `Error writing file: ${err}` }], isError: true };
-    }
+      if (_signal?.aborted) return { content: [{ type: "text", text: "edit_lines: operation aborted before writing." }], isError: true };
+      try {
+        await writeFile(absPath, result.join("\n"), "utf-8");
+      } catch (err) {
+        return { content: [{ type: "text", text: `Error writing file: ${err}` }], isError: true };
+      }
 
-    const changed = edits.reduce((s, e) => s + (e.to - e.from + 1), 0);
-    const added = edits.reduce((s, e) => s + e.new_text.split("\n").length, 0);
-
-    return {
-      content: [{ type: "text", text: `Applied ${edits.length} edit(s) to ${rawPath} (${changed} lines replaced, ${added} lines added).` }],
-      details: { editsApplied: edits.length, linesChanged: changed, linesAdded: added },
-    };
+      const changed = edits.reduce((s, e) => s + (e.to - e.from + 1), 0);
+      const added = edits.reduce((s, e) => s + e.new_text.split("\n").length, 0);
+      return {
+        content: [{ type: "text", text: `Applied ${edits.length} edit(s) to ${rawPath} (${changed} lines replaced, ${added} lines added).` }],
+        details: { editsApplied: edits.length, linesChanged: changed, linesAdded: added },
+      };
+    });
   },
 };
 

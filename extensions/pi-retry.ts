@@ -52,6 +52,12 @@ export default function piRetry(pi: ExtensionAPI) {
 
   pi.on("agent_end", () => {
     clearTimeout(stallTimer);
+    stallTimer = undefined;
+  });
+
+  pi.on("session_shutdown", () => {
+    clearTimeout(stallTimer);
+    stallTimer = undefined;
   });
 
   pi.on("message_end", (event, ctx) => {

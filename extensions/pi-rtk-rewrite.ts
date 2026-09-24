@@ -405,9 +405,12 @@ function writeFile(path: string, content: string): void {
 
 function applyEdit(path: string, oldText: string, newText: string): boolean {
 	if (!existsSync(path)) throw new Error(`File not found: ${path}`);
-	const content = readFileSync(path);
+	const content = readFileSync(path, "utf8");
 	const idx = content.indexOf(oldText);
 	if (idx === -1) throw new Error(`oldText not found in ${path}`);
+	if (content.indexOf(oldText, idx + oldText.length) !== -1) {
+		throw new Error(`oldText is not unique in ${path}; include more surrounding context`);
+	}
 	const updated = content.slice(0, idx) + newText + content.slice(idx + oldText.length);
 	writeFileSync(path, updated, "utf8");
 	return true;

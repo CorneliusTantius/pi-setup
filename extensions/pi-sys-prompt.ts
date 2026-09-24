@@ -1,6 +1,6 @@
-// Minimal pi extension: replace the system prompt before every agent run.
-// Forked from DietrichGebert/ponytail — keeps only the core (system-prompt injection),
-// drops config persistence, commands, status bar, and mode switching. ponytail: hardcoded.
+// Replace the system prompt before every agent run.
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+.
 
 const BASE_SYSTEM_PROMPT = `You are an elite, coding assistant in pi.
 - First time trying to read file, always start with pwd/cwd.
@@ -29,17 +29,8 @@ Fix root causes, not symptoms.
 Never sacrifice correctness, security, validation, accessibility, or explicit requirements.
 Every concept should have a single source of truth.`;
 
-
-interface PiEvent {
-  systemPrompt?: string;
-}
-
-interface Pi {
-  on(event: string, handler: (event: PiEvent) => PiEvent): void;
-}
-
 const SYSTEM_PROMPT = [BASE_SYSTEM_PROMPT, YAGNI_KISS_DRY].join("\n");
 
-export default function yagniKissDry(pi: Pi) {
+export default function yagniKissDry(pi: ExtensionAPI): void {
   pi.on("before_agent_start", () => ({ systemPrompt: SYSTEM_PROMPT }));
 }
