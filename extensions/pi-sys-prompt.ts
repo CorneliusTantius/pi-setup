@@ -1,6 +1,5 @@
 // Replace the system prompt before every agent run.
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-.
 
 const BASE_SYSTEM_PROMPT = `You are an elite, coding assistant in pi.
 - First time trying to read file, always start with pwd/cwd.
