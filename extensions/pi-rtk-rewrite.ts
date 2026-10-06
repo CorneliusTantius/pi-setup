@@ -65,7 +65,7 @@ function isBuildCmd(cmd: string | null): boolean {
 	return cmd !== null && BUILD_PATTERNS.some((p) => p.test(cmd));
 }
 
-function filterBuildOutput(text: string, cmd: string | null): string | null {
+function filterBuildOutput(text: string, cmd: string | null, exitCode: number): string | null {
 	if (!isBuildCmd(cmd)) return null;
 	const lines = text.split("\n");
 	let compiled = 0;
@@ -93,9 +93,13 @@ function filterBuildOutput(text: string, cmd: string | null): string | null {
 	}
 	if (inError && curError.length > 0) errors.push(curError);
 
-	if (errors.length === 0 && warnings.length === 0) return `[OK] Build successful (${compiled} units compiled)`;
+	if (errors.length === 0 && warnings.length === 0) {
+		return exitCode === 0
+			? `[OK] Build successful (${compiled} units compiled)`
+			: `[FAIL] Build exited with code ${exitCode}; no recognized errors were found.\n\n${text}`;
+	}
 
-	const out: string[] = [];
+	const out: string[] = exitCode === 0 ? [] : [`[FAIL] Build exited with code ${exitCode}.`];
 	if (errors.length > 0) {
 		out.push(`[ERROR] ${errors.length} error(s):`);
 		for (const e of errors.slice(0, 5)) { out.push(...e.slice(0, 10)); if (e.length > 10) out.push("  ..."); }
@@ -319,7 +323,7 @@ function aggregateLinterOutput(text: string, cmd: string | null): string | null 
 // ── output compaction ───────────────────────────────────────────────
 interface CompactState { text: string; techniques: string[] }
 
-function compactBash(text: string, command: string | null): CompactState {
+function compactBash(text: string, command: string | null, exitCode = 0): CompactState {
 	const st: CompactState = { text, techniques: [] };
 	const stripped = stripAnsi(st.text);
 	if (stripped !== st.text) { st.text = stripped; st.techniques.push("ansi"); }
@@ -328,7 +332,7 @@ function compactBash(text: string, command: string | null): CompactState {
 		const r = fn(st.text, command);
 		if (r !== null && r !== st.text) { st.text = r; st.techniques.push(tech); }
 	};
-	apply(filterBuildOutput, "build", isBuildCmd);
+	apply((output, cmd) => filterBuildOutput(output, cmd, exitCode), "build", isBuildCmd);
 	if (isTestCmd(command)) apply(aggregateTestOutput, "test", () => true);
 	if (isGitCmd(command)) apply(compactGitOutput, "git", () => true);
 	if (isLintCmd(command)) apply(aggregateLinterOutput, "linter", () => true);
@@ -508,7 +512,7 @@ export default function rtkRewriteExtension(pi: ExtensionAPI) {
 
 				// Compact output
 				const cmdSeg = firstSegment(command);
-				const compacted = compactBash(output, cmdSeg);
+				const compacted = compactBash(output, cmdSeg, result.code ?? 1);
 				const text = compacted.techniques.length > 0
 					? `[RTK compacted: ${compacted.techniques.join(", ")}]\n${compacted.text}`
 					: compacted.text;

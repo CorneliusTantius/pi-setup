@@ -203,6 +203,7 @@ async function runAgent(
     let buffer = "";
     let settled = false;
     let timeoutTimer: NodeJS.Timeout | undefined;
+    let abortListener: (() => void) | undefined;
 
     // Kill the entire process group. spawn()'s own timeout and child.kill() only hit
     // the direct child; grandchildren (LLM HTTP client, the bash/git the worker/tester
@@ -221,10 +222,17 @@ async function runAgent(
       timeoutTimer = undefined;
     };
 
+    const clearAbortListener = () => {
+      if (!signal || !abortListener) return;
+      signal.removeEventListener("abort", abortListener);
+      abortListener = undefined;
+    };
+
     const settle = (result: RunResult) => {
       if (settled) return;
       settled = true;
       clearTimers();
+      clearAbortListener();
       killGroup("SIGKILL"); // reap the whole tree even if close/error already fired
       resolve(result);
     };
@@ -308,7 +316,10 @@ async function runAgent(
         }
       };
       if (signal.aborted) abort();
-      else signal.addEventListener("abort", abort, { once: true });
+      else {
+        abortListener = abort;
+        signal.addEventListener("abort", abort, { once: true });
+      }
     }
 
     // Hard timeout managed here: spawn()'s own timeout only kills the direct child.

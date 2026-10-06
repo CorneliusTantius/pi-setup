@@ -621,13 +621,10 @@ function patchFooter(): void {
     try {
       if (lines.length > 1) {
         const theme = getTheme();
-        const cwd = this.session?.sessionManager?.getCwd?.() ?? "";
-        const branch = cwd ? readGitBranch(cwd) : undefined;
-        const branchStr = branch ? fg(theme, "mdLink", `⎇ ${branch}`) : "";
         const workingStr = workingSince > 0
           ? fg(theme, "warning", `● ${formatDuration(Date.now() - workingSince)}`)
           : "";
-        const extras = [branchStr, workingStr].filter(Boolean).join(" ");
+        const extras = workingStr;
         const stats = footerStatsLine(this.session, width);
         lines[1] = extras
           ? truncateToWidth(`${fg(theme, "dim", extras)}  ${stats}`, width, "")

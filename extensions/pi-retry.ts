@@ -20,19 +20,27 @@ const TAG_CODEX = "[codex-generic-retry]";
 const HINT = "provider returned error";
 
 let stallTimer: ReturnType<typeof setTimeout> | undefined;
+let stallRetryPending = false;
+let stallRetryUsed = false;
 
 export default function piRetry(pi: ExtensionAPI) {
   pi.on("agent_start", (_event, ctx) => {
+    stallRetryPending = false;
     ctx.ui.setStatus("pi-retry", undefined);
   });
 
   pi.on("agent_settled", (_event, ctx) => {
+    stallRetryPending = false;
+    stallRetryUsed = false;
     ctx.ui.setStatus("pi-retry", undefined);
   });
 
   pi.on("before_provider_request", () => {
     clearTimeout(stallTimer);
-    stallTimer = setTimeout(() => pi.abort?.(), STALL_MS);
+    stallTimer = setTimeout(() => {
+      stallRetryPending = true;
+      pi.abort?.();
+    }, STALL_MS);
   });
 
   pi.on("after_provider_response", () => {
@@ -58,6 +66,17 @@ export default function piRetry(pi: ExtensionAPI) {
   pi.on("session_shutdown", () => {
     clearTimeout(stallTimer);
     stallTimer = undefined;
+    stallRetryPending = false;
+  });
+
+  pi.on("agent_before_settle", (event, ctx) => {
+    if (!stallRetryPending) return;
+    stallRetryPending = false;
+    if (event.outcome !== "aborted" || stallRetryUsed) return;
+
+    stallRetryUsed = true;
+    ctx.ui.setStatus("pi-retry", `${TAG_STALL} retrying…`);
+    return { continue: true };
   });
 
   pi.on("message_end", (event, ctx) => {
@@ -86,17 +105,4 @@ export default function piRetry(pi: ExtensionAPI) {
     };
   });
 
-  // Handle abort from stall
-  pi.on("agent_end", (event, ctx) => {
-    const msg = event.message as any;
-    if (msg?.role !== "assistant" || !msg?.errorMessage?.includes("aborted")) return;
-
-    return {
-      message: {
-        ...msg,
-        stopReason: "error",
-        errorMessage: `${msg.errorMessage || "Provider stream stalled."}\n\n${TAG_STALL} ${HINT}`,
-      },
-    };
-  });
 }
