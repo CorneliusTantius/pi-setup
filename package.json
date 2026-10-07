@@ -12,9 +12,7 @@
   "pi": {
     "extensions": [
       "./extensions/pi-swarm.ts",
-      "./extensions/pi-sys-prompt.ts",
-      "./extensions/pi-deepseek-enhancement.ts",
-      "./extensions/pi-general-enhancement.ts"
+      "./extensions/pi-sys-prompt.ts"
     ]
   },
   "peerDependencies": {

@@ -14,8 +14,6 @@ Restart Pi or run `/reload` after installing. Use `pi config` to enable/disable 
 
 | Extension | Path | What it does |
 |-----------|------|-------------|
-| **DeepSeek enhancement** | `extensions/pi-deepseek-enhancement.ts` | DeepSeek-specific fixes: cache prefix stability (strips reasoning/timestamps, sorts tool schemas), hashline editing (`edit_lines` tool), edit input repair (trim-tolerant matching), tool steering (first-tool hints, semantic-miss blocking). Auto-activates on DeepSeek models. |
-| **General enhancement** | `extensions/pi-general-enhancement.ts` | Model-agnostic: storm-breaker (breaks consecutive failure loops after N identical errors, enhances error messages), edit retry with fuzzy matching (resolves ~60% of edit mismatches). | |
 | **Swarm** | `extensions/pi-swarm.ts` | `spawn_swarm` tool — runs agents (scout, worker, tester, reviewer) as isolated `pi --mode json` subprocesses. Single or parallel (up to 6) tasks. | |
 | **System prompt** | `extensions/pi-sys-prompt.ts` | Overrides the system prompt with YAGNI/KISS/DRY principles + coding discipline. |
 
@@ -48,8 +46,6 @@ In `~/.pi/agent/settings.json`, use the `extensions` filter:
 
 ```text
 extensions/
-  pi-deepseek-enhancement.ts
-  pi-general-enhancement.ts
   pi-swarm.ts
   pi-sys-prompt.ts
 prompts/
